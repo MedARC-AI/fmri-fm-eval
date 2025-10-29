@@ -1,9 +1,15 @@
-# freesurfer license file
+# scratch
+.scratch
+
+# freesurfer
 license.txt
+fsaverage
 
 # data
+resources
 sourcedata
 
 # outputs
 preprocessed
 logs
+.old
