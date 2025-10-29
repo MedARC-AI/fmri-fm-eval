@@ -19,5 +19,11 @@ bash scripts/find_subjects.sh
 Run preprocessing
 
 ```bash
-parallel ./scripts/preprocess.sh {} ::: {1..64}
+parallel -j 64 ./scripts/preprocess.sh {} ::: {1..961}
+```
+
+Inspect fmriprep output figures
+
+```bash
+python ../utils/img_viewer.py preprocessed/fmriprep
 ```
