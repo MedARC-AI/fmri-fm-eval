@@ -1,3 +1,6 @@
+# env vars
+.env*
+
 # scratch
 .scratch
 
@@ -6,10 +9,5 @@ license.txt
 fsaverage
 
 # data
-resources
-sourcedata
-
-# outputs
-preprocessed
+data
 logs
-.old
