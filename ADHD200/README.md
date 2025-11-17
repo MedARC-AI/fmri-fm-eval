@@ -31,7 +31,7 @@ docker ps -aq --filter ancestor=nipreps/fmriprep:25.2.3 | xargs -r docker rm -f
 Inspect fmriprep output figures
 
 ```bash
-python ../utils/img_viewer.py data/fmriprep
+python ../scripts/img_viewer.py data/fmriprep
 ```
 
 Upload fmriprep outputs to r2
