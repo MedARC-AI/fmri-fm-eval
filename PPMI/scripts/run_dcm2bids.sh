@@ -1,15 +1,19 @@
 #!/bin/bash
 
+# Get the directory where this script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+# Parent dir (PPMI folder) is one level up from scripts folder
+PARENT_DIR="$SCRIPT_DIR/.."
+
 # Path to DICOM subjects
-SRC_DIR=../unzipped/PPMI_01/PPMI
+SRC_DIR="$PARENT_DIR/unzipped/PPMI_01/PPMI"
 
 # Path to BIDS output directory
-BIDS_DIR=../bids
+BIDS_DIR="$PARENT_DIR/bids"
 
 # Path to config file
-CONFIG=../bids/code/dcm2bids_config.json
-
-mkdir -p "$BIDS_DIR"
+CONFIG="$BIDS_DIR/code/dcm2bids_config.json"
 
 # Loop through each subject folder
 for SUB in $SRC_DIR/*; do

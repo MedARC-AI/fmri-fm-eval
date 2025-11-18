@@ -20,7 +20,7 @@ PPMI_01.zip.ac
 ...
 ```
 
-### Reconstruct the full ZIP file
+Reconstruct the full ZIP file
 ```bash
 cat PPMI/dicom/PPMI_01.zip.* > PPMI/dicom/PPMI_01.zip
 ``` 
@@ -38,9 +38,9 @@ PPMI/unzipped/PPMI_01/PPMI/<subject_id>/...
 ```
 
 ## DICOM to BIDS Conversion
-Install `dcm2niix` and `dcm2bids`. 
+Ensure `dcm2niix` and `dcm2bids` are installed.
 
-Create an empty BIDS directory
+Create BIDS directory structure
 ```bash
 mkdir -p PPMI/bids
 ```
@@ -50,9 +50,11 @@ Create template BIDS metadata files
 dcm2bids_scaffold -o PPMI/bids
 ```
 
-Create/place the dcm2bids configuration file here -
-```
-PPMI/bids/code/dcm2bids_config.json
+Copy configuration file 
+
+The conversion requires the configuration file, which is provided at `PPMI/scripts/dcm2bids_config.json`. **Copy this file** into the BIDS metadata location: 
+```bash 
+cp PPMI/scripts/dcm2bids_config.json PPMI/bids/code/dcm2bids_config.json
 ```
 
 Run the conversion
@@ -60,7 +62,8 @@ Run the conversion
 bash PPMI/scripts/run_dcm2bids.sh
 ```
 
-This will populate:
+Expected output structure
+
 ```
 PPMI/bids/sub-<ID>/
 ```
