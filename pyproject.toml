@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools_scm[toml]>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fmri-fm-eval"
+dynamic = ["version"]
+description = "MedARC fMRI foundation model evals"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "datasets",
+    "huggingface_hub",
+    "ipython",
+    "jupyter",
+    "matplotlib",
+    "nibabel",
+    "nsdcode",
+    "numpy",
+    "omegaconf",
+    "pandas",
+    "pre-commit",
+    "pytest",
+    "scikit-learn",
+    "tqdm",
+    "webdataset",
+    "cloudpathlib[s3]",
+]
+
+[tool.setuptools_scm]
+version_file = "src/fmri_fm_eval/_version.py"
+
+[tool.uv.sources]
+nsdcode = { git = "https://github.com/cvnlab/nsdcode.git", rev = "bfd36a503cc90a3eb3ebfd69b269403f7e186924" }
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+ignore = ["F722"]

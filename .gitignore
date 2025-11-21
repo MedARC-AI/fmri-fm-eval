@@ -1,5 +1,25 @@
-# env vars
-.env*
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+_version.py
+
+# IDE
+.vscode/
+
+# Virtual environment
+.venv/
+
+# Environment variables
+.env
+.env.*
+
+# Jupyter Notebook
+.ipynb_checkpoints
 
 # scratch
 .scratch
