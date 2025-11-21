@@ -22,7 +22,7 @@ SEED = 2912
 
 
 def main():
-    outpath = ROOT / "splits/hcpya_subject_splits.json"
+    outpath = ROOT / "splits/hcpya_subject_batch_splits.json"
     assert not outpath.exists(), f"output splits {outpath} already exist"
 
     rng = check_random_state(SEED)
