@@ -28,14 +28,3 @@ def get_brain_model_axis(cifti: Cifti2Image) -> BrainModelAxis:
         if isinstance(axis, BrainModelAxis):
             return axis
     raise ValueError("No brain model axis found in cifti")
-
-
-def scale(series: np.ndarray, eps: float = 1e-6):
-    mean = np.mean(series, axis=0)
-    std = np.std(series, axis=0)
-    valid_mask = std > eps
-    series = (series - mean) / std.clip(min=eps)
-    series = series * valid_mask
-    mean = mean * valid_mask
-    std = std * valid_mask
-    return series, mean, std
