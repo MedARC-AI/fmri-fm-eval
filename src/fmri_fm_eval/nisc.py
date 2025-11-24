@@ -1,19 +1,234 @@
-"""Utilities for processing surface vertex data to flat maps.
+"""
+Misc neuroimaging utils.
 
-Includes utils for:
+- reading cifti data
+- loading parcellations
+- parcellation averaging
 - loading pycortex flat maps
-- resampling surface vertex data to flat raster grid using pycortex flat surfaces
+- surface to flat map projection
+- basic data preprocessing
 """
 
 import math
+import urllib.request
+from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
 import cortex
 import numpy as np
+import nibabel as nib
 import scipy.interpolate
+import scipy.signal
 from matplotlib.tri import Triangulation
+from nibabel.cifti2 import BrainModelAxis, Cifti2Image
+from scipy.sparse import coo_array
 from scipy.spatial import Delaunay
 from sklearn.neighbors import NearestNeighbors
+
+
+FSLR64K_NUM_VERTICES = 64984
+
+
+# CIFTI related utils
+
+
+def read_cifti_data(path: str | Path) -> np.ndarray:
+    img = nib.load(path)
+    data = np.ascontiguousarray(img.get_fdata())
+    return data
+
+
+def read_cifti_surf_data(path: str | Path) -> np.ndarray:
+    img = nib.load(path)
+    data = get_cifti_surf_data(img)
+    return data
+
+
+def get_cifti_surf_data(cifti: Cifti2Image) -> np.ndarray:
+    lh_data = get_cifti_struct_data(cifti, "CIFTI_STRUCTURE_CORTEX_LEFT")
+    rh_data = get_cifti_struct_data(cifti, "CIFTI_STRUCTURE_CORTEX_RIGHT")
+    data = np.concatenate([lh_data, rh_data], axis=1)
+    return data
+
+
+def get_cifti_struct_data(cifti: Cifti2Image, struct: str) -> np.ndarray:
+    """Get cifti scalar/series data for a given brain structure."""
+    axis = get_brain_model_axis(cifti)
+    data = cifti.get_fdata()
+    T, D = data.shape
+    for name, indices, model in axis.iter_structures():
+        if name == struct:
+            num_verts = model.vertex.max() + 1
+            struct_data = np.zeros((T, num_verts), dtype=data.dtype)
+            struct_data[:, model.vertex] = data[:, indices]
+            return struct_data
+    raise ValueError(f"Invalid cifti struct {struct}")
+
+
+def get_brain_model_axis(cifti: Cifti2Image) -> BrainModelAxis:
+    for ii in range(cifti.ndim):
+        axis = cifti.header.get_axis(ii)
+        if isinstance(axis, BrainModelAxis):
+            return axis
+    raise ValueError("No brain model axis found in cifti")
+
+
+# Parcellation utils
+
+
+PARC_CACHE_DIR = Path.home() / ".cache" / "parcellations"
+
+
+def fetch_schaefer(
+    num_rois: int,
+    *,
+    order: Literal[7, 17] = 17,
+    space: Literal["fslr64k", "mni"] = "fslr64k",
+) -> Path:
+    if space == "fslr64k":
+        base_url = (
+            "https://github.com/ThomasYeoLab/CBIG/raw/refs/heads/master/"
+            "stable_projects/brain_parcellation/Schaefer2018_LocalGlobal/"
+            "Parcellations/HCP/fslr32k/cifti/"
+        )
+        filename = f"Schaefer2018_{num_rois}Parcels_{order}Networks_order.dlabel.nii"
+    elif space == "mni":
+        base_url = (
+            "https://github.com/ThomasYeoLab/CBIG/raw/refs/heads/master/"
+            "stable_projects/brain_parcellation/Schaefer2018_LocalGlobal/"
+            "Parcellations/MNI/"
+        )
+        filename = f"Schaefer2018_{num_rois}Parcels_{order}Networks_order_FSLMNI152_2mm.nii.gz"
+    else:
+        raise ValueError(f"Invalid space {space}.")
+
+    path = download_file(base_url, filename, cache_dir=PARC_CACHE_DIR)
+    return path
+
+
+def fetch_schaefer_tian(
+    num_rois: int,
+    scale: int,
+    *,
+    order: Literal[7, 17] = 17,
+    space: Literal["fslr91k", "mni"] = "fslr91k",
+) -> Path:
+    if space == "fslr91k":
+        base_url = (
+            "https://github.com/yetianmed/subcortex/raw/refs/heads/master/"
+            "Group-Parcellation/3T/Cortex-Subcortex/"
+        )
+        filename = f"Schaefer2018_{num_rois}Parcels_{order}Networks_order_Tian_Subcortex_S{scale}.dlabel.nii"
+    elif space == "mni":
+        base_url = (
+            "https://github.com/yetianmed/subcortex/raw/refs/heads/master/"
+            "Group-Parcellation/3T/Cortex-Subcortex/MNIvolumetric/"
+        )
+        # nb, 17 network order mni parcellation does not exist.
+        filename = f"Schaefer2018_{num_rois}Parcels_{order}Networks_order_Tian_Subcortex_S{scale}_MNI152NLin6Asym_2mm.nii.gz"
+    else:
+        raise ValueError(f"Invalid space {space}.")
+    path = download_file(base_url, filename, cache_dir=PARC_CACHE_DIR)
+    return path
+
+
+def download_file(base_url: str, filename: str, cache_dir: str | Path) -> Path:
+    url = f"{base_url}/{filename}"
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cached_file = cache_dir / filename
+    if not cached_file.exists():
+        urllib.request.urlretrieve(url, cached_file)
+        assert cached_file.exists(), f"Download failed: {url}"
+    return cached_file
+
+
+def parc_to_one_hot(parc: np.ndarray, sparse: bool = True) -> np.ndarray:
+    """Get one hot encoding of the parcellation.
+
+    Args:
+        parc: parcellation of shape (num_vertices,) with values in [0, num_rois] where 0
+            is background.
+
+    Returns:
+        parc_one_hot: one hot encoding of parcellation, shape (num_rois, num_vertices).
+    """
+    (num_verts,) = parc.shape
+    parc = np.round(parc).astype(np.int32)
+    num_rois = parc.max()
+
+    # one hot parcellation matrix, shape (num_vertices, num_rois)
+    if sparse:
+        mask = parc > 0
+        (col_ind,) = mask.nonzero()
+        row_ind = parc[mask] - 1
+        values = np.ones(len(col_ind), dtype=np.float32)
+        parc_one_hot = coo_array((values, (row_ind, col_ind)), shape=(num_rois, num_verts))
+        parc_one_hot = parc_one_hot.tocsr()
+    else:
+        roi_ids = np.arange(1, num_rois + 1)
+        parc_one_hot = (roi_ids[:, None] == parc).astype(np.float32)
+    return parc_one_hot
+
+
+def parcellate_timeseries(
+    series: np.ndarray, parc_one_hot: np.ndarray, eps: float = 1e-6
+) -> np.ndarray:
+    """Extract parcel-wise averaged (i.e. parcellated) time series.
+
+    Args:
+        series: full time series (num_samples, num_vertices)
+        parc_one_hot: one hot encoding of parcellation (num_rois, num_vertices)
+
+    Returns:
+        parc_series: parcellated time series (num_samples, num_rois)
+    """
+    parc_one_hot = parc_one_hot.astype(series.dtype)
+
+    # don't include verts with missing data
+    valid_mask = np.std(series, axis=0) > eps
+    parc_one_hot = parc_one_hot * valid_mask
+
+    # normalize weights to sum to 1
+    # Nb, empty parcels will be all zero
+    parc_counts = np.asarray(parc_one_hot.sum(axis=1))
+    parc_one_hot = parc_one_hot / np.maximum(parc_counts, 1)[:, None]
+
+    # per roi averaging
+    parc_series = series @ parc_one_hot.T
+    return parc_series
+
+
+class ParcelAverage:
+    def __init__(self, parc: np.ndarray, sparse: bool = True, eps: float = 1e-6):
+        self.parc = parc
+        self.sparse = sparse
+        self.eps = eps
+        self.parc_one_hot = parc_to_one_hot(parc, sparse=sparse)
+        self.num_rois = self.parc_one_hot.shape[0]
+
+    def transform(self, series: np.ndarray) -> np.ndarray:
+        series = parcellate_timeseries(series, self.parc_one_hot, eps=self.eps)
+        return series
+
+    __call__ = transform
+
+
+def parcel_average_schaefer_fslr64k(num_rois: int, **kwargs):
+    path = fetch_schaefer(num_rois, space="fslr64k")
+    parc = read_cifti_surf_data(path).squeeze(0)
+    parcavg = ParcelAverage(parc, **kwargs)
+    return parcavg
+
+
+def parcel_average_schaefer_tian_fslr91k(num_rois: int, scale: int, **kwargs):
+    path = fetch_schaefer_tian(num_rois, scale, space="fslr91k")
+    parc = read_cifti_data(path).squeeze(0)
+    parcavg = ParcelAverage(parc, **kwargs)
+    return parcavg
+
+
+# Flat map utils
 
 
 class Surface(NamedTuple):
@@ -164,7 +379,7 @@ class FlatResampler:
         points, polys = surf
 
         # Fit raster grid to the scattered points.
-        grid, bbox = fit_grid(
+        grid, bbox = _fit_grid(
             points,
             pixel_size=self.pixel_size,
             rect=self.rect,
@@ -270,7 +485,7 @@ class FlatResampler:
         return flat_data
 
 
-def fit_grid(
+def _fit_grid(
     points: np.ndarray,
     pixel_size: float,
     rect: Bbox | None = None,
@@ -343,3 +558,99 @@ def _pad_bbox(
     xmin -= pixel_size * pad_width[1][0]
     xmax += pixel_size * pad_width[1][1]
     return Bbox(xmin, xmax, ymin, ymax)
+
+
+def _create_flat_resampler(
+    subject: str,
+    hemi_padding: float,
+    bbox: Bbox,
+    pixel_size: float,
+    roi_path: str | None,
+):
+    surf, mask = load_flat(subject, hemi_padding=hemi_padding)
+
+    if roi_path:
+        roi_img = nib.load(roi_path)
+        roi_mask = get_cifti_surf_data(roi_img)
+        roi_mask = roi_mask.flatten() > 0
+        mask = mask & roi_mask
+
+    resampler = FlatResampler(pixel_size=pixel_size, rect=bbox)
+    resampler.fit(surf, mask)
+    return resampler
+
+
+def flat_resampler_fslr64k_224_560():
+    roi_path = fetch_schaefer(1000)
+
+    resampler = _create_flat_resampler(
+        subject="32k_fs_LR",
+        hemi_padding=8.0,
+        bbox=(-336, 336, -122.8, 146),
+        pixel_size=1.2,
+        roi_path=roi_path,
+    )
+    return resampler
+
+
+# Data preprocessing
+
+
+def scale(
+    series: np.ndarray, axis: int = 0, eps: float = 1e-6
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Standard scaling (i.e. zscore).
+
+    Returns a tuple of (series, mean, std).
+    """
+    mean = np.mean(series, axis=axis, keepdims=True)
+    std = np.std(series, axis=axis, keepdims=True)
+    valid_mask = std > eps
+    series = (series - mean) / std.clip(min=eps)
+    series = series * valid_mask
+    mean = mean * valid_mask
+    std = std * valid_mask
+    return series, mean, std
+
+
+def resample_timeseries(
+    series: np.ndarray,
+    tr: float,
+    new_tr: float = 1.0,
+    kind: str = "cubic",
+    antialias: bool = True,
+) -> np.ndarray:
+    """Resample a time series to a target TR.
+
+    Args:
+        series: time series, shape (n_samples, dim).
+        tr: repetition time, i.e. 1 / fs.
+        new_tr: target repetition time.
+        kind: interpolation kind
+        antialias: apply an antialising filter before downsampling.
+
+    Returns:
+        Resampled time series, shape (n_new_samples, dim).
+    """
+    if tr == new_tr:
+        return series
+
+    fs = 1.0 / tr
+    new_fs = 1.0 / new_tr
+
+    # Anti-aliasing low-pass filter
+    # Copied from scipy.signal.decimate
+    if antialias and new_fs < fs:
+        q = fs / new_fs
+        sos = scipy.signal.cheby1(8, 0.05, 0.8 / q, output="sos")
+        series = scipy.signal.sosfiltfilt(sos, series, axis=0, padtype="even")
+
+    # Nb, this is more reliable than arange(0, duration, tr) due to floating point
+    # errors.
+    x = tr * np.arange(len(series))
+    new_length = int(tr * len(series) / new_tr)
+    new_x = new_tr * np.arange(new_length)
+
+    interp = scipy.interpolate.interp1d(x, series, kind=kind, axis=0)
+    series = interp(new_x)
+    return series
