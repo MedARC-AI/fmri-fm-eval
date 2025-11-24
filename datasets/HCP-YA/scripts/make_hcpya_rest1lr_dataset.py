@@ -1,12 +1,17 @@
+import argparse
 import json
 import logging
+import sys
+import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import datasets as hfds
-import nibabel as nib
 import numpy as np
+from cloudpathlib import AnyPath, CloudPath
 
-import fmri_fm_eval.utils as ut
+import fmri_fm_eval.nisc as nisc
+import fmri_fm_eval.readers as readers
 
 logging.basicConfig(
     format="[%(levelname)s %(asctime)s]: %(message)s",
@@ -30,21 +35,16 @@ SUB_BATCH_SPLITS = {
 # https://www.humanconnectome.org/hcp-protocols-ya-7t-imaging
 HCP_TR = {"3T": 0.72, "7T": 1.0}
 
-# Number of total fslr vertices across cortex
-NUM_VERTICES = 64984
-
 # 500 TRs = 6 mins
 MAX_NUM_TRS = 500
 
-NUM_PROC = 16
 
-
-def main():
-    outdir = ROOT / "data/processed/hcpya-rest1lr.fslr64k.arrow"
+def main(args):
+    outdir = ROOT / f"data/processed/hcpya-rest1lr.{args.space}.arrow"
     _logger.info("Generating dataset: %s", outdir)
     if outdir.exists():
         _logger.warning("Output %s exists; exiting.", outdir)
-        return
+        return 1
 
     # construct train/val/test splits by combining subject batches.
     # nb, across batches subjects are unrelated. we use the batches to dial how much
@@ -52,15 +52,24 @@ def main():
     with (ROOT / "splits/hcpya_subject_batch_splits.json").open() as f:
         sub_batch_splits = json.load(f)
 
+    if args.space.startswith("mni"):
+        suffix = "rfMRI_REST1_LR.nii.gz"
+    else:
+        suffix = "rfMRI_REST1_LR_Atlas_MSMAll.dtseries.nii"
+
+    root = AnyPath(args.root or HCP_ROOT)
     path_splits = {}
     for split, batch_ids in SUB_BATCH_SPLITS.items():
         paths = [
-            f"{sub}/MNINonLinear/Results/rfMRI_REST1_LR/rfMRI_REST1_LR_Atlas_MSMAll.dtseries.nii"
+            f"{sub}/MNINonLinear/Results/rfMRI_REST1_LR/{suffix}"
             for batch_id in batch_ids
             for sub in sub_batch_splits[f"batch-{batch_id:02d}"]
         ]
-        path_splits[split] = paths = [p for p in paths if (HCP_ROOT / p).exists()]
+        path_splits[split] = paths = [p for p in paths if (root / p).exists()]
         _logger.info("Num subjects (%s): %d", split, len(paths))
+
+    reader = readers.READER_DICT[args.space]()
+    dim = readers.DATA_DIMS[args.space]
 
     features = hfds.Features(
         {
@@ -73,9 +82,9 @@ def main():
             "start": hfds.Value("int32"),
             "end": hfds.Value("int32"),
             "tr": hfds.Value("float32"),
-            "bold": hfds.Array2D(shape=(None, NUM_VERTICES), dtype="float16"),
-            "mean": hfds.Array2D(shape=(1, NUM_VERTICES), dtype="float16"),
-            "std": hfds.Array2D(shape=(1, NUM_VERTICES), dtype="float16"),
+            "bold": hfds.Array2D(shape=(None, dim), dtype="float16"),
+            "mean": hfds.Array2D(shape=(1, dim), dtype="float32"),
+            "std": hfds.Array2D(shape=(1, dim), dtype="float32"),
         }
     )
 
@@ -84,8 +93,8 @@ def main():
         dataset_dict[split] = hfds.Dataset.from_generator(
             generate_samples,
             features=features,
-            gen_kwargs={"paths": paths},
-            num_proc=NUM_PROC,
+            gen_kwargs={"paths": paths, "root": root, "reader": reader, "dim": dim},
+            num_proc=args.num_proc,
             split=hfds.NamedSplit(split),
         )
     dataset = hfds.DatasetDict(dataset_dict)
@@ -94,27 +103,22 @@ def main():
     dataset.save_to_disk(outdir, max_shard_size="300MB")
 
 
-def generate_samples(paths: list[str]):
-    for path in paths:
-        fullpath = HCP_ROOT / path
-
+def generate_samples(paths: list[str], *, root: AnyPath, reader: readers.Reader, dim: int):
+    for path, fullpath in prefetch(root, paths):
         meta = parse_hcp_metadata(fullpath)
         tr = HCP_TR[meta["mag"]]
 
-        img = nib.load(fullpath)
-        series = ut.get_cifti_surf_data(img)
-        series = np.ascontiguousarray(series.T)
+        series = reader(fullpath)
 
         T, D = series.shape
-        assert D == NUM_VERTICES
+        assert D == dim
         if T < MAX_NUM_TRS:
             _logger.warning(f"Path {path} does not have enough data ({T}<{MAX_NUM_TRS}); skipping.")
             continue
 
         start, end = 0, MAX_NUM_TRS
         series = series[start:end]
-        series, mean, std = ut.scale(series)
-        series = series.astype(np.float16)
+        series, mean, std = nisc.scale(series)
 
         sample = {
             **meta,
@@ -122,11 +126,33 @@ def generate_samples(paths: list[str]):
             "start": start,
             "end": end,
             "tr": tr,
-            "bold": series,
-            "mean": mean[None, :],
-            "std": std[None, :],
+            "bold": series.astype(np.float16),
+            "mean": mean.astype(np.float32),
+            "std": std.astype(np.float32),
         }
         yield sample
+
+
+def prefetch(root: AnyPath, paths: list[str], *, max_workers: int = 1):
+    with tempfile.TemporaryDirectory(prefix="prefetch-") as tmpdir:
+
+        def fn(path: str):
+            fullpath = root / path
+            if isinstance(fullpath, CloudPath):
+                tmppath = Path(tmpdir) / path
+                tmppath.parent.mkdir(parents=True, exist_ok=True)
+                fullpath = fullpath.download_to(tmppath)
+            return path, fullpath
+
+        with ThreadPoolExecutor(max_workers) as executor:
+            futures = [executor.submit(fn, p) for p in paths]
+
+            for future in futures:
+                path, fullpath = future.result()
+                yield path, fullpath
+
+                if str(fullpath).startswith(tmpdir):
+                    fullpath.unlink()
 
 
 def parse_hcp_metadata(path: Path) -> dict[str, str]:
@@ -142,4 +168,9 @@ def parse_hcp_metadata(path: Path) -> dict[str, str]:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", type=str, default=None)
+    parser.add_argument("--space", type=str, default="fslr64k", choices=list(readers.READER_DICT))
+    parser.add_argument("--num_proc", "-j", type=int, default=16)
+    args = parser.parse_args()
+    sys.exit(main(args))
