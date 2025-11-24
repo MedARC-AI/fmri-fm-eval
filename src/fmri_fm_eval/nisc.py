@@ -26,19 +26,25 @@ from scipy.spatial import Delaunay
 from sklearn.neighbors import NearestNeighbors
 
 
-FSLR64K_NUM_VERTICES = 64984
+# NIFTI/CIFTI related utils
 
 
-# CIFTI related utils
+def read_nifti_data(path: str | Path) -> np.ndarray:
+    """Read nifti array data as shape (T, Z, Y, X)."""
+    img = nib.load(path)
+    data = np.ascontiguousarray(img.get_fdata().T)
+    return data
 
 
 def read_cifti_data(path: str | Path) -> np.ndarray:
+    """Read cifti array data as shape (T, D)."""
     img = nib.load(path)
     data = np.ascontiguousarray(img.get_fdata())
     return data
 
 
 def read_cifti_surf_data(path: str | Path) -> np.ndarray:
+    """Read cifti surface only array data as shape (T, D)."""
     img = nib.load(path)
     data = get_cifti_surf_data(img)
     return data
@@ -138,8 +144,10 @@ def download_file(base_url: str, filename: str, cache_dir: str | Path) -> Path:
     cache_dir.mkdir(parents=True, exist_ok=True)
     cached_file = cache_dir / filename
     if not cached_file.exists():
-        urllib.request.urlretrieve(url, cached_file)
-        assert cached_file.exists(), f"Download failed: {url}"
+        try:
+            urllib.request.urlretrieve(url, cached_file)
+        except Exception as exc:
+            raise ValueError(f"Download failed: {url}") from exc
     return cached_file
 
 
