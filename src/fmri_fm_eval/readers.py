@@ -5,10 +5,6 @@ import numpy as np
 from . import nisc
 
 
-# TODO
-# - add parcellation reader for brainlm
-
-
 class Reader(Protocol):
     def __call__(self, path: str) -> np.ndarray: ...
 

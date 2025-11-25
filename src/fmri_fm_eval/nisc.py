@@ -174,7 +174,7 @@ def parc_to_one_hot(parc: np.ndarray, sparse: bool = True) -> np.ndarray:
     parc = np.round(parc).astype(np.int32)
     num_rois = parc.max()
 
-    # one hot parcellation matrix, shape (num_vertices, num_rois)
+    # one hot parcellation matrix, shape (num_rois, num_vertices)
     if sparse:
         mask = parc > 0
         (col_ind,) = mask.nonzero()
