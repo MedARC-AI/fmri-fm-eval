@@ -1,0 +1,13 @@
+{
+    "target": "PMAT24_A_CR",
+    "na_count": 9,
+    "bins": [
+        15.0,
+        20.0
+    ],
+    "label_counts": [
+        443,
+        432,
+        322
+    ]
+}

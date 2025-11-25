@@ -1,0 +1,13 @@
+{
+    "target": "NEOFAC_N",
+    "na_count": 7,
+    "bins": [
+        13.333,
+        19.0
+    ],
+    "label_counts": [
+        400,
+        410,
+        389
+    ]
+}

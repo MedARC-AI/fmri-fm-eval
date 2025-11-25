@@ -1,0 +1,13 @@
+{
+    "target": "Flanker_Unadj",
+    "na_count": 0,
+    "bins": [
+        106.76,
+        115.38
+    ],
+    "label_counts": [
+        402,
+        407,
+        397
+    ]
+}

@@ -1,0 +1,13 @@
+{
+    "target": "Age",
+    "na_count": 0,
+    "bins": [
+        25,
+        30
+    ],
+    "label_counts": [
+        247,
+        527,
+        432
+    ]
+}

@@ -1,0 +1,12 @@
+{
+    "target": "Gender",
+    "na_count": 0,
+    "bins": [
+        "F",
+        "M"
+    ],
+    "label_counts": [
+        656,
+        550
+    ]
+}
