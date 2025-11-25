@@ -7,13 +7,14 @@ from sklearn.model_selection import GroupKFold
 from sklearn.utils import check_random_state
 
 ROOT = Path(__file__).parents[1]
-HCP_RESTRICTED_CSV_PATH = ROOT / "data/metadata/hcpya_restricted.csv"
+HCP_RESTRICTED_CSV_PATH = ROOT / "metadata/hcpya_restricted.csv"
 
 HCP_ROOT = ROOT / "data/sourcedata/HCP_1200"
 
 # Total number of HCP subjects released in HCP-1200
 # Nb: this is an outdated number of subjects. As of 2025-11-18, there are now 1113
-# subjects on s3://hcp-openaccess/HCP_1200.
+# subjects on s3://hcp-openaccess/HCP_1200. But we're not updating to keep consistency
+# with earlier work.
 HCP_NUM_SUBJECTS = 1098
 
 # Number of batches of non-overlapping unrelated subjects
@@ -22,7 +23,7 @@ SEED = 2912
 
 
 def main():
-    outpath = ROOT / "splits/hcpya_subject_batch_splits.json"
+    outpath = ROOT / "metadata/hcpya_subject_batch_splits.json"
     assert not outpath.exists(), f"output splits {outpath} already exist"
 
     rng = check_random_state(SEED)
@@ -33,16 +34,16 @@ def main():
 
     groups = load_hcp_family_groups(HCP_RESTRICTED_CSV_PATH)
     groups = groups.loc[all_subjects].values
-    
+
     splitter = GroupKFold(n_splits=NUM_BATCHES, shuffle=True, random_state=rng)
 
     splits = {}
     for ii, (_, ind) in enumerate(splitter.split(all_subjects, groups=groups)):
         splits[f"batch-{ii:02d}"] = all_subjects[ind].tolist()
 
-    outpath.parent.mkdir(exist_ok=True)    
+    outpath.parent.mkdir(exist_ok=True)
     with outpath.open("w") as f:
-        json.dump(splits, f, indent=4)
+        print(json.dumps(splits, indent=4), file=f)
 
 
 def load_hcp_family_groups(hcp_restricted_csv: str | Path) -> pd.Series:

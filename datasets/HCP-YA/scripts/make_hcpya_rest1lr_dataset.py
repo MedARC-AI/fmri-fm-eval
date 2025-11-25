@@ -56,7 +56,7 @@ def main(args):
     # construct train/val/test splits by combining subject batches.
     # nb, across batches subjects are unrelated. we use the batches to dial how much
     # data to include.
-    with (ROOT / "splits/hcpya_subject_batch_splits.json").open() as f:
+    with (ROOT / "metadata/hcpya_subject_batch_splits.json").open() as f:
         sub_batch_splits = json.load(f)
 
     if args.space in {"a424", "mni"}:

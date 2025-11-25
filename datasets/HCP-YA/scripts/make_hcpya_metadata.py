@@ -67,7 +67,7 @@ def main():
         num_proc=NUM_PROC,
     )
 
-    dataset.to_parquet(ROOT / "data/metadata/hcpya_metadata.parquet")
+    dataset.to_parquet(ROOT / "metadata/hcpya_metadata.parquet")
 
 
 def generate_metadata(paths: list[str]):
