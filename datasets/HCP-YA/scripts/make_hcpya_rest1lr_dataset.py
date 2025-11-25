@@ -19,23 +19,30 @@ logging.basicConfig(
     datefmt="%y-%m-%d %H:%M:%S",
 )
 logging.getLogger("nibabel").setLevel(logging.ERROR)
+
 _logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).parents[1]
 HCP_ROOT = ROOT / "data/sourcedata/HCP_1200"
 
-# ~500 subs total, 6:2:2 ratio
+# ~600 subs total, 4:1:1 ratio
 SUB_BATCH_SPLITS = {
-    "train": [0, 1, 2, 3, 4, 5],
+    "train": [0, 1, 2, 3, 4, 5, 6, 7],
     "validation": [16, 17],
     "test": [18, 19],
+}
+
+NUM_SUBS = {
+    "train": 440,
+    "validation": 98,
+    "test": 115,
 }
 
 # https://www.humanconnectome.org/hcp-protocols-ya-3t-imaging
 # https://www.humanconnectome.org/hcp-protocols-ya-7t-imaging
 HCP_TR = {"3T": 0.72, "7T": 1.0}
 
-# 500 TRs = 6 mins
+# Only keep the first 500 TRs = 6 mins for each run
 MAX_NUM_TRS = 500
 
 
@@ -57,6 +64,7 @@ def main(args):
     else:
         suffix = "rfMRI_REST1_LR_Atlas_MSMAll.dtseries.nii"
 
+    # root can be local or remote.
     root = AnyPath(args.root or HCP_ROOT)
     path_splits = {}
     for split, batch_ids in SUB_BATCH_SPLITS.items():
@@ -67,10 +75,15 @@ def main(args):
         ]
         path_splits[split] = paths = [p for p in paths if (root / p).exists()]
         _logger.info("Num subjects (%s): %d", split, len(paths))
+        assert len(paths) == NUM_SUBS[split], "unexpected number of paths"
 
+    # load the data reader for the target space and look up the data dimension.
+    # all readers return a bold data array of shape (n_samples, dim).
     reader = readers.READER_DICT[args.space]()
     dim = readers.DATA_DIMS[args.space]
 
+    # the bold data are scaled to mean 0, stdev 1 and then truncated to float16 to save
+    # space. but we keep the mean and std to reverse this since some models need this.
     features = hfds.Features(
         {
             "sub": hfds.Value("string"),
@@ -88,19 +101,22 @@ def main(args):
         }
     )
 
-    dataset_dict = {}
-    for split, paths in path_splits.items():
-        dataset_dict[split] = hfds.Dataset.from_generator(
-            generate_samples,
-            features=features,
-            gen_kwargs={"paths": paths, "root": root, "reader": reader, "dim": dim},
-            num_proc=args.num_proc,
-            split=hfds.NamedSplit(split),
-        )
-    dataset = hfds.DatasetDict(dataset_dict)
+    # generate the datasets with huggingface. cache to a temp dir to save space.
+    with tempfile.TemporaryDirectory(prefix="huggingface-") as tmpdir:
+        dataset_dict = {}
+        for split, paths in path_splits.items():
+            dataset_dict[split] = hfds.Dataset.from_generator(
+                generate_samples,
+                features=features,
+                gen_kwargs={"paths": paths, "root": root, "reader": reader, "dim": dim},
+                num_proc=args.num_proc,
+                split=hfds.NamedSplit(split),
+                cache_dir=tmpdir,
+            )
+        dataset = hfds.DatasetDict(dataset_dict)
 
-    outdir.parent.mkdir(exist_ok=True, parents=True)
-    dataset.save_to_disk(outdir, max_shard_size="300MB")
+        outdir.parent.mkdir(exist_ok=True, parents=True)
+        dataset.save_to_disk(outdir, max_shard_size="300MB")
 
 
 def generate_samples(paths: list[str], *, root: AnyPath, reader: readers.Reader, dim: int):
@@ -134,6 +150,8 @@ def generate_samples(paths: list[str], *, root: AnyPath, reader: readers.Reader,
 
 
 def prefetch(root: AnyPath, paths: list[str], *, max_workers: int = 1):
+    """Prefetch files from remote storage."""
+
     with tempfile.TemporaryDirectory(prefix="prefetch-") as tmpdir:
 
         def fn(path: str):
@@ -171,6 +189,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=str, default=None)
     parser.add_argument("--space", type=str, default="fslr64k", choices=list(readers.READER_DICT))
-    parser.add_argument("--num_proc", "-j", type=int, default=16)
+    parser.add_argument("--num_proc", "-j", type=int, default=32)
     args = parser.parse_args()
     sys.exit(main(args))
