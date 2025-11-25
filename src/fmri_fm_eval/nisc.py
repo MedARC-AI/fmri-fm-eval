@@ -138,6 +138,15 @@ def fetch_schaefer_tian(
     return path
 
 
+def fetch_a424():
+    base_url = (
+        "https://github.com/emergelab/hierarchical-brain-networks/raw/refs/heads/master/brainmaps"
+    )
+    filename = "A424+2mm.nii.gz"
+    path = download_file(base_url, filename, cache_dir=PARC_CACHE_DIR)
+    return path
+
+
 def download_file(base_url: str, filename: str, cache_dir: str | Path) -> Path:
     url = f"{base_url}/{filename}"
     cache_dir = Path(cache_dir)
@@ -209,13 +218,15 @@ def parcellate_timeseries(
 
 class ParcelAverage:
     def __init__(self, parc: np.ndarray, sparse: bool = True, eps: float = 1e-6):
-        self.parc = parc
         self.sparse = sparse
         self.eps = eps
-        self.parc_one_hot = parc_to_one_hot(parc, sparse=sparse)
-        self.num_rois = self.parc_one_hot.shape[0]
+
+        self.mask = parc > 0
+        self.parc = parc[self.mask]
+        self.parc_one_hot = parc_to_one_hot(self.parc, sparse=sparse)
 
     def transform(self, series: np.ndarray) -> np.ndarray:
+        series = series[:, self.mask]
         series = parcellate_timeseries(series, self.parc_one_hot, eps=self.eps)
         return series
 
@@ -232,6 +243,13 @@ def parcel_average_schaefer_fslr64k(num_rois: int, **kwargs):
 def parcel_average_schaefer_tian_fslr91k(num_rois: int, scale: int, **kwargs):
     path = fetch_schaefer_tian(num_rois, scale, space="fslr91k")
     parc = read_cifti_data(path).squeeze(0)
+    parcavg = ParcelAverage(parc, **kwargs)
+    return parcavg
+
+
+def parcel_average_a424(**kwargs):
+    path = fetch_a424()
+    parc = read_nifti_data(path)
     parcavg = ParcelAverage(parc, **kwargs)
     return parcavg
 

@@ -51,6 +51,17 @@ def schaefer400_tians3_reader() -> Reader:
     return fn
 
 
+def a424_reader() -> Reader:
+    parcavg = nisc.parcel_average_a424()
+
+    def fn(path: str):
+        series = nisc.read_nifti_data(path)
+        series = parcavg(series)
+        return series
+
+    return fn
+
+
 def flat_reader() -> Reader:
     resampler = nisc.flat_resampler_fslr64k_224_560()
 
@@ -80,6 +91,7 @@ READER_DICT = {
     "fslr91k": fslr91k_reader,
     "schaefer400": schaefer400_reader,
     "schaefer400_tians3": schaefer400_tians3_reader,
+    "a424": a424_reader,
     "flat": flat_reader,
     "mni": mni_reader,
 }
@@ -90,6 +102,7 @@ DATA_DIMS = {
     "fslr91k": 91282,
     "schaefer400": 400,
     "schaefer400_tians3": 450,
+    "a424": 424,
     "flat": 77763,
     "mni": 132032,
 }
