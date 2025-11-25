@@ -59,7 +59,7 @@ def main(args):
     with (ROOT / "splits/hcpya_subject_batch_splits.json").open() as f:
         sub_batch_splits = json.load(f)
 
-    if args.space.startswith("mni"):
+    if args.space in {"a424", "mni"}:
         suffix = "rfMRI_REST1_LR.nii.gz"
     else:
         suffix = "rfMRI_REST1_LR_Atlas_MSMAll.dtseries.nii"
