@@ -31,3 +31,8 @@ fsaverage
 # data
 data
 logs
+
+# HCP-YA
+hcpya_restricted.csv
+hcpya_unrestricted.csv
+hcpya_metadata.parquet
