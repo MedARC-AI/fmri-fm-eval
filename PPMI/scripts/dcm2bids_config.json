@@ -1,0 +1,55 @@
+{
+  "descriptions": [
+    {
+      "datatype": "anat",
+      "suffix": "T1w",
+      "criteria": {
+        "SeriesDescription": "3D*T1*"
+      }
+    },
+    {
+      "datatype": "func",
+      "suffix": "bold",
+      "custom_entities": "task-rest_dir-LR",
+      "criteria": {
+        "SeriesDescription": "*MRI_LR*"
+      },
+      "sidecar_changes": {
+        "TaskName": "rest"
+      }
+    },
+    {
+      "datatype": "func",
+      "suffix": "bold",
+      "custom_entities": "task-rest_dir-RL",
+      "criteria": {
+        "SeriesDescription": "*MRI_RL*"
+      },
+      "sidecar_changes": {
+        "TaskName": "rest"
+      }
+    },
+    {
+      "datatype": "func",
+      "suffix": "bold",
+      "custom_entities": "task-rest_dir-AP",
+      "criteria": {
+        "SeriesDescription": "*MRI_AP*"
+      },
+      "sidecar_changes": {
+        "TaskName": "rest"
+      }
+    },
+    {
+      "datatype": "func",
+      "suffix": "bold",
+      "custom_entities": "task-rest_dir-PA",
+      "criteria": {
+        "SeriesDescription": "*MRI_PA*"
+      },
+      "sidecar_changes": {
+        "TaskName": "rest"
+      }
+    }
+  ]
+}
