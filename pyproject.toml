@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 dependencies = [
     "cloudpathlib[s3]",
     "datasets",
+    "einops",
     "huggingface_hub",
     "ipython",
     "jupyter",

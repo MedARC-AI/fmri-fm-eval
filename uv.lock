@@ -3,7 +3,8 @@ revision = 2
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14'",
-    "python_full_version >= '3.12' and python_full_version < '3.14'",
+    "python_full_version == '3.13.*'",
+    "python_full_version == '3.12.*'",
     "python_full_version < '3.12'",
 ]
 
@@ -736,6 +737,15 @@ wheels = [
 ]
 
 [[package]]
+name = "einops"
+version = "0.8.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e5/81/df4fbe24dff8ba3934af99044188e20a98ed441ad17a274539b74e82e126/einops-0.8.1.tar.gz", hash = "sha256:de5d960a7a761225532e0f1959e5315ebeafc0cd43394732f103ca44b9837e84", size = 54805, upload-time = "2025-02-09T03:17:00.434Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/87/62/9773de14fe6c45c23649e98b83231fffd7b9892b6cf863251dc2afa73643/einops-0.8.1-py3-none-any.whl", hash = "sha256:919387eb55330f5757c6bea9165c5ff5cfe63a642682ea788a6d472576d81737", size = 64359, upload-time = "2025-02-09T03:17:01.998Z" },
+]
+
+[[package]]
 name = "executing"
 version = "2.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -768,6 +778,7 @@ source = { editable = "." }
 dependencies = [
     { name = "cloudpathlib", extra = ["s3"] },
     { name = "datasets" },
+    { name = "einops" },
     { name = "huggingface-hub" },
     { name = "ipython" },
     { name = "jupyter" },
@@ -791,6 +802,7 @@ dependencies = [
 requires-dist = [
     { name = "cloudpathlib", extras = ["s3"] },
     { name = "datasets" },
+    { name = "einops" },
     { name = "huggingface-hub" },
     { name = "ipython" },
     { name = "jupyter" },
