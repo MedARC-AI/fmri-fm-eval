@@ -1,6 +1,4 @@
 #!/bin/bash
-
-# Target spaces for ADNI dataset (same as HCP-YA)
 spaces=(
     schaefer400
     schaefer400_tians3
