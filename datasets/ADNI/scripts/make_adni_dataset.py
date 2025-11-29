@@ -1,7 +1,4 @@
-"""Generate ADNI eval dataset in multiple output spaces.
-
-Following HCP-YA structure for consistency.
-"""
+# Generate ADNI eval dataset in multiple output spaces.
 
 import argparse
 import json
@@ -27,13 +24,10 @@ _logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).parents[1]
 
-# ADNI fMRIPrep output directory
 ADNI_FMRIPREP_ROOT = Path("/teamspace/studios/this_studio/ADNI_fmriprep/output")
 
-# Curation CSV path
 CURATION_CSV_PATH = Path("/teamspace/studios/this_studio/ADNI_fmriprep/ADNI_curation.csv")
 
-# ADNI TR is typically 3.0s for resting state (but we read from sidecar JSON)
 # Default TR if not found in metadata
 DEFAULT_TR = 3.0
 
@@ -54,7 +48,6 @@ def main(args):
         _logger.warning("Output %s exists; exiting.", outdir)
         return 1
 
-    # Load subject splits
     splits_path = ROOT / "metadata/adni_subject_splits.json"
     if not splits_path.exists():
         _logger.error("Subject splits not found. Run make_adni_metadata.py first.")
@@ -63,21 +56,14 @@ def main(args):
     with splits_path.open() as f:
         subject_splits = json.load(f)
     
-    # Get file suffix for this space
-    if args.space not in SPACE_SUFFIXES:
-        _logger.error("Unknown space: %s. Available: %s", args.space, list(SPACE_SUFFIXES.keys()))
-        return 1
-    
     suffix = SPACE_SUFFIXES[args.space]
     
-    # Build paths for each split
     path_splits = {}
     for split, sessions in subject_splits.items():
         paths = []
         subjects_found = set()
         for sess in sessions:
             sub, ses = sess["sub"], sess["ses"]
-            # Construct path: sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}{suffix}
             rel_path = f"sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}{suffix}"
             full_path = ADNI_FMRIPREP_ROOT / rel_path
             if full_path.exists():
@@ -98,15 +84,12 @@ def main(args):
         _logger.error("No files found for any split. Check paths.")
         return 1
     
-    # Load the data reader for the target space
     reader = readers.READER_DICT[args.space]()
     dim = readers.DATA_DIMS[args.space]
     
-    # Dynamically set writer_batch_size based on data dimensions
-    # Estimate: ~200 timepoints * dim * 2 bytes (float16) per sample
-    # Target batch size ~700MB for efficient streaming
+    # Dynamically set writer_batch_size (setting 700 MB per shard) 
     estimated_sample_bytes = 200 * dim * 2
-    max_batch_bytes = 700 * 1024 * 1024  # 700MB
+    max_batch_bytes = 700 * 1024 * 1024  
     writer_batch_size = max(1, int(max_batch_bytes / estimated_sample_bytes))
     _logger.info("Using writer_batch_size=%d for dim=%d", writer_batch_size, dim)
     
@@ -123,7 +106,6 @@ def main(args):
         }
     )
     
-    # Generate datasets
     with tempfile.TemporaryDirectory(prefix="huggingface-") as tmpdir:
         dataset_dict = {}
         for split, paths in path_splits.items():
@@ -160,14 +142,11 @@ def generate_samples(paths: list[str], *, root: Path, reader, dim: int):
     for path in paths:
         full_path = root / path
         
-        # Parse metadata from path
         meta = parse_adni_metadata(path)
         
-        # Get TR from sidecar JSON if available
         tr = get_tr_from_sidecar(full_path)
         
         try:
-            # Read and process series
             series = reader(str(full_path))
             
             T, D = series.shape
@@ -179,7 +158,6 @@ def generate_samples(paths: list[str], *, root: Path, reader, dim: int):
                 _logger.warning("Path %s has too few frames (%d); skipping.", path, T)
                 continue
             
-            # Apply global z-score normalization
             series, mean, std = nisc.scale(series)
             
             sample = {
@@ -216,13 +194,11 @@ def parse_adni_metadata(path: str) -> dict[str, str]:
 
 def get_tr_from_sidecar(nifti_path: Path) -> float:
     """Get TR from sidecar JSON file."""
-    # Try common JSON sidecar locations
     json_candidates = [
         nifti_path.with_suffix(".json"),
         nifti_path.with_suffix("").with_suffix(".json"),  # For .nii.gz
     ]
     
-    # Handle .dtseries.nii case
     if str(nifti_path).endswith(".dtseries.nii"):
         json_path = Path(str(nifti_path).replace(".dtseries.nii", ".json"))
         json_candidates.insert(0, json_path)
