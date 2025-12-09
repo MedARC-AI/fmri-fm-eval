@@ -1,7 +1,9 @@
 from typing import Protocol
 
+import nibabel as nib
 import numpy as np
 from templateflow import api as tflow
+from nilearn.image import resample_to_img
 
 from . import nisc
 
@@ -71,12 +73,29 @@ def flat_reader() -> Reader:
     return fn
 
 
+MNI152_2MM_SHAPE = (91, 109, 91)
+MNI152_1pt6MM_SHAPE = (113, 136, 113)
+
+
 def mni_cortex_reader() -> Reader:
     roi_path = nisc.fetch_schaefer(400, space="mni")
-    mask = nisc.read_nifti_data(roi_path) > 0
+    roi_img = nib.load(roi_path)
+    mask = np.ascontiguousarray(roi_img.get_fdata().T) > 0
 
     def fn(path: str):
-        series = nisc.read_nifti_data(path)
+        img = nib.load(path)
+
+        # 1.6mm resolution used for hcp 7T
+        if img.shape[:3] == MNI152_1pt6MM_SHAPE:
+            img = resample_to_img(
+                img, roi_img, interpolation="linear", force_resample=True, copy_header=True
+            )
+
+        assert img.shape[:3] == MNI152_2MM_SHAPE, (
+            f"Invalid image shape {img.shape}; expected {MNI152_2MM_SHAPE}."
+        )
+
+        series = np.ascontiguousarray(img.get_fdata().T)
         series = series[:, mask]
         return series
 
