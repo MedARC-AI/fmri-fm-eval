@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+import os
 import shutil
 import sys
 import tempfile
@@ -8,9 +9,9 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import webdataset as wds
-from cloudpathlib import AnyPath, CloudPath
-from tqdm import tqdm
+from cloudpathlib import AnyPath, CloudPath, S3Client
 
 import fmri_fm_eval.nisc as nisc
 import fmri_fm_eval.readers as readers
@@ -26,37 +27,35 @@ _logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).parents[1]
 HCP_ROOT = ROOT / "data/sourcedata/HCP_1200"
+META_PATH = ROOT / "metadata/hcpya_metadata.parquet"
 
-EXCLUDE_ACQS = {
-    # Exclude merged retinotopic localizer scan.
-    "tfMRI_7T_RETCCW_AP_RETCW_PA_RETEXP_AP_RETCON_PA_RETBAR1_AP_RETBAR2_PA",
-}
-
+# Subject batches for each split.
 SUB_BATCH_SPLITS = {
     "train": list(range(16)),
     "validation": list(range(16, 18)),
     "test": list(range(18, 20)),
 }
 
+# We use a fixed number of shards per subject batch for convenient dataset subsampling.
+# We use a consistent number of shards per batch across data formats so that sampling
+# behavior is consistent.
 SHARDS_PER_BATCH = 100
 
 # https://www.humanconnectome.org/hcp-protocols-ya-3t-imaging
 # https://www.humanconnectome.org/hcp-protocols-ya-7t-imaging
 HCP_TR = {"3T": 0.72, "7T": 1.0}
 
-# resample all time series to 1s tr
-# this is mainly for consistency with previous versions of the dataset
+# Resample all time series to 1s tr. This is mainly for consistency with previous
+# versions of the dataset.
 TARGET_TR = 1.0
 INTERPOLATION = "pchip"
 
+# Fixed seed for shuffling runs within each batch of shards.
 SEED = 2146
 
 
 def main(args):
     # check shard id
-    # we use a fixed number of shards per batch for convenient dataset subsampling.
-    # nb we use a consistent number of shards per batch across data formats so that
-    # sampling behavior is consistent.
     batch_ids = SUB_BATCH_SPLITS[args.split]
     shards_per_batch = SHARDS_PER_BATCH
     num_shards = shards_per_batch * len(batch_ids)
@@ -74,6 +73,11 @@ def main(args):
         num_shards,
     )
 
+    # use a different s3 credential for upload
+    upload_client = get_r2_client()
+    if isinstance(outpath, CloudPath) and upload_client is not None:
+        outpath = CloudPath(outpath, client=upload_client)
+
     if outpath.exists():
         _logger.info("Output %s exists; exiting.", outpath)
         return 0
@@ -85,20 +89,16 @@ def main(args):
     batch_shard_id = args.shard_id % shards_per_batch
     batch_subjects = sub_batch_splits[f"batch-{batch_id:02d}"]
 
-    # get the preprocessed time series paths for the curret batch of subjects
+    # get the preprocessed time series paths for the current batch of subjects
+    meta_df = pd.read_parquet(META_PATH)
+    sub_mask = meta_df["sub"].isin(batch_subjects)
+    batch_series_paths = sorted(meta_df.loc[sub_mask, "path"].values)
+
     # volume space for a424 and mni, otherwise cifti space
     if args.space in {"a424", "mni"}:
-        pattern = "*_[LRAP][LRAP].nii.gz"
-    else:
-        pattern = "*_[LRAP][LRAP]_Atlas_MSMAll.dtseries.nii"
-
-    root = AnyPath(args.root or HCP_ROOT)
-    batch_series_paths = sorted(
-        path.relative_to(root)
-        for sub in batch_subjects
-        for path in (root / sub / "MNINonLinear/Results").rglob(pattern)
-        if path.parent.name not in EXCLUDE_ACQS
-    )
+        batch_series_paths = [
+            p.replace("_Atlas_MSMAll.dtseries.nii", ".nii.gz") for p in batch_series_paths
+        ]
 
     # split series paths into shards
     # shuffle so that data order is randomized when reading a shard sequentially.
@@ -111,12 +111,11 @@ def main(args):
     path_start, path_stop = path_offsets[batch_shard_id : batch_shard_id + 2]
     shard_series_paths = batch_series_paths[path_start:path_stop]
     _logger.info(
-        "Batch %d shard %02d/%d (n=%d)\n\tshard_series_paths[:5] = %s",
+        "Batch %d shard %02d/%d (n=%d)",
         batch_id,
         batch_shard_id,
         shards_per_batch,
         len(shard_series_paths),
-        "\n\t" + "\n\t".join(map(str, shard_series_paths[:5])),
     )
 
     # load the data reader for the target space and look up the data dimension.
@@ -124,16 +123,19 @@ def main(args):
     reader = readers.READER_DICT[args.space]()
     dim = readers.DATA_DIMS[args.space]
 
+    root = AnyPath(args.root or HCP_ROOT)
+
     # Temp output path, in case of incomplete processing.
     with tempfile.TemporaryDirectory(prefix="wds-") as tmp_outdir:
         tmp_outpath = AnyPath(tmp_outdir) / outpath.name
 
         # Generate wds samples.
         with wds.TarWriter(str(tmp_outpath)) as sink:
-            for sample in tqdm(
+            for ii, sample in enumerate(
                 generate_samples(shard_series_paths, root=root, reader=reader, dim=dim)
             ):
                 sink.write(sample)
+                _logger.info("[%02d/%d] %s", ii, len(shard_series_paths), sample["__key__"])
 
         outpath.parent.mkdir(exist_ok=True, parents=True)
         with tmp_outpath.open("rb") as fsrc:
@@ -150,6 +152,8 @@ def generate_samples(paths: list[str], *, root: AnyPath, reader: readers.Reader,
         tr = HCP_TR[meta["mag"]]
 
         series = reader(fullpath)
+        series, mean, std = nisc.scale(series)
+
         series = nisc.resample_timeseries(series, tr=tr, new_tr=TARGET_TR, kind=INTERPOLATION)
         tr = TARGET_TR
 
@@ -157,11 +161,9 @@ def generate_samples(paths: list[str], *, root: AnyPath, reader: readers.Reader,
         assert D == dim
         n_frames = T
 
-        series, mean, std = nisc.scale(series)
-
         sample = {
             "__key__": key,
-            "meta.json": {**meta, "path": path, "n_frames": n_frames, "tr": tr},
+            "meta.json": {**meta, "path": str(path), "n_frames": n_frames, "tr": tr},
             "bold.npy": series.astype(np.float16),
             "mean.npy": mean.astype(np.float32),
             "std.npy": std.astype(np.float32),
@@ -203,6 +205,16 @@ def parse_hcp_metadata(path: Path) -> dict[str, str]:
         mag = "3T"
     metadata = {"sub": sub, "mod": mod, "task": task, "mag": mag, "dir": dir}
     return metadata
+
+
+def get_r2_client():
+    if "R2_ACCESS_KEY_ID" in os.environ:
+        return S3Client(
+            aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
+            aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+            endpoint_url=os.environ["R2_ENDPOINT_URL_S3"],
+        )
+    return None
 
 
 if __name__ == "__main__":
