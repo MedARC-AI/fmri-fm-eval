@@ -32,8 +32,6 @@ META_PATH = ROOT / "metadata/hcpya_metadata.parquet"
 # Subject batches for each split.
 SUB_BATCH_SPLITS = {
     "train": list(range(16)),
-    "validation": list(range(16, 18)),
-    "test": list(range(18, 20)),
 }
 
 # We use a fixed number of shards per subject batch for convenient dataset subsampling.
