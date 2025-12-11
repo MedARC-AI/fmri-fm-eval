@@ -19,12 +19,12 @@ roots=(
     s3://hcp-openaccess/HCP_1200
 )
 
-log_path="logs/make_hcpya_rest1lr_dataset.log"
+log_path="logs/make_hcpya_rest1lr_arrow.log"
 
 for ii in {0..4}; do
     space=${spaces[ii]}
     root=${roots[ii]}
-    uv run python scripts/make_hcpya_rest1lr_dataset.py \
+    uv run python scripts/make_hcpya_rest1lr_arrow.py \
         --space "${space}" \
         --root "${root}" \
         2>&1 | tee -a "${log_path}"
