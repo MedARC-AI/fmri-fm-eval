@@ -8,7 +8,7 @@ from jaxtyping import Float
 class Embeddings(NamedTuple):
     cls_embeds: Float[Tensor, "B 1 D"] | None
     reg_embeds: Float[Tensor, "B R D"] | None
-    tok_embeds: Float[Tensor, "B L D"] | None
+    patch_embeds: Float[Tensor, "B L D"] | None
 
 
 class ModelWrapper(nn.Module):

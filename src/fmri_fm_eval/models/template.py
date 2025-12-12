@@ -35,7 +35,7 @@ class NewModelWrapper(nn.Module):
     - reformatting the model's embeddings as a tuple of:
         - cls_embeds [B, 1, D]
         - reg_embeds [B, R, D]
-        - tok_embeds [B, L, D]
+        - patch_embeds [B, L, D]
 
     If the model doesn't use one or more of these embeddings, they can be set to None.
 
