@@ -25,6 +25,8 @@ from scipy.sparse import coo_array
 from scipy.spatial import Delaunay
 from sklearn.neighbors import NearestNeighbors
 
+FSLR64K_NUM_VERTICES = 64984
+
 
 # NIFTI/CIFTI related utils
 
@@ -222,8 +224,8 @@ class ParcelAverage:
         self.eps = eps
 
         self.mask = parc > 0
-        self.parc = parc[self.mask]
-        self.parc_one_hot = parc_to_one_hot(self.parc, sparse=sparse)
+        self.parc = parc
+        self.parc_one_hot = parc_to_one_hot(self.parc[self.mask], sparse=sparse)
 
     def transform(self, series: np.ndarray) -> np.ndarray:
         series = series[:, self.mask]
