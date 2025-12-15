@@ -28,6 +28,7 @@ dependencies = [
     "scikit-learn",
     "torch",
     "tqdm",
+    "wandb",
     "webdataset",
     "yaspy",
 ]
