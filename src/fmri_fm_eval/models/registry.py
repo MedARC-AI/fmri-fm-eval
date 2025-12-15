@@ -4,7 +4,7 @@ import pkgutil
 from typing import Callable
 
 import fmri_fm_eval.models
-from fmri_fm_eval.models.base import ModelTransformPair, ModelFn, default_transform
+from fmri_fm_eval.models.base import ModelTransformPair, ModelFn
 
 _logger = logging.getLogger(__package__)
 
@@ -40,11 +40,7 @@ def create_model(name: str, **kwargs) -> ModelTransformPair:
     model_pair = _MODEL_REGISTRY[name](**kwargs)
 
     if not isinstance(model_pair, tuple):
-        model = model_pair
-        transform = default_transform
-    else:
-        transform, model = model_pair
-        transform = default_transform if transform is None else transform
+        transform, model = None, model_pair
     return transform, model
 
 

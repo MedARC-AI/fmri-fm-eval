@@ -32,7 +32,8 @@ def test_model(name: str, n_samples: int):
     batch = []
     for _ in range(batch_size):
         sample = get_dummy_sample(model.__space__, n_samples)
-        sample = transform(sample)
+        if transform is not None:
+            sample = transform(sample)
         batch.append(sample)
     batch = default_collate(batch)
 

@@ -23,6 +23,12 @@ class ModelWrapper(nn.Module):
     __space__: str
     """Expected input data space."""
 
+    __train_params__: list[str] | None
+    """List of param names or glob patterns to unfreeze."""
+
+    __no_decay_params__: list[str] | None
+    """List of param names or glob patterns to exclude from weight decay."""
+
     def forward(self, batch: dict[str, Tensor]) -> Embeddings: ...
 
 
@@ -35,11 +41,6 @@ class ModelTransform:
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]: ...
 
 
-def default_transform(sample: dict[str, Tensor]) -> dict[str, Tensor]:
-    """Default No-op transform."""
-    return sample
-
-
-ModelTransformPair = tuple[ModelTransform, ModelWrapper]
+ModelTransformPair = tuple[ModelTransform | None, ModelWrapper]
 
 ModelFn = Callable[..., ModelWrapper | ModelTransformPair]
