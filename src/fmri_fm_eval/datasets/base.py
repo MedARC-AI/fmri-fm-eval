@@ -5,10 +5,19 @@ from typing import Any, Callable
 import datasets as hfds
 import numpy as np
 import fsspec
-from torch.utils.data import Dataset
+import torch
 
 
-class ArrowDataset(Dataset):
+class Dataset:
+    """
+    Abstract dataset.
+    """
+
+    __num_classes__: int
+    """Number of target classes, or target dimension for regression."""
+
+
+class ArrowDataset(torch.utils.data.Dataset):
     """
     HF Arrow dataset.
 
@@ -23,6 +32,8 @@ class ArrowDataset(Dataset):
         hf://datasets/clane9/fmri-fm-eval/hcpya-rest1lr.schaefer400_tians3.arrow/train
         ```
     """
+
+    __num_classes__: int
 
     def __init__(
         self,

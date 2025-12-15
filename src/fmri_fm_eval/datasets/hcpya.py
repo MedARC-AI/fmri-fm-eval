@@ -13,6 +13,14 @@ HCPYA_TARGET_MAP_DICT = {
     "pmat24": "hcpya_target_map_PMAT24_A_CR.json",
 }
 
+HCPYA_TARGET_NUM_CLASSES = {
+    "age": 3,
+    "flanker": 3,
+    "gender": 3,
+    "neofacn": 3,
+    "pmat24": 3,
+}
+
 
 def _create_hcpya_rest1lr(space: str, target: str, **kwargs):
     target_key = "sub"
@@ -23,12 +31,16 @@ def _create_hcpya_rest1lr(space: str, target: str, **kwargs):
     splits = ["train", "validation", "test"]
     for split in splits:
         url = f"{HCPYA_ROOT}/hcpya-rest1lr.{space}.arrow/{split}"
-        dataset_dict[split] = ArrowDataset(
+        dataset = ArrowDataset(
             url,
             target_map_path=target_map_path,
             target_key=target_key,
             **kwargs,
         )
+        dataset.__num_classes__ = HCPYA_TARGET_NUM_CLASSES[target]
+
+        dataset_dict[split] = dataset
+
     return dataset_dict
 
 
