@@ -1,5 +1,6 @@
-import pytest
+import argparse
 
+import pytest
 import torch
 from torch import Tensor
 from torch.utils.data import default_collate
@@ -47,3 +48,15 @@ def test_model(name: str, n_samples: int):
     if patch_embeds is not None:
         assert patch_embeds.ndim == 3
         assert patch_embeds.shape[0] == batch_size
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("model", type=str, nargs="*")
+    args = parser.parse_args()
+
+    if args.model:
+        filter_args = ["-k", " or ".join(args.model)]
+    else:
+        filter_args = []
+    pytest.main(filter_args + [__file__])
