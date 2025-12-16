@@ -9,6 +9,7 @@ Misc neuroimaging utils.
 - basic data preprocessing
 """
 
+import logging
 import math
 import urllib.request
 from pathlib import Path
@@ -24,6 +25,10 @@ from nibabel.cifti2 import BrainModelAxis, Cifti2Image
 from scipy.sparse import coo_array
 from scipy.spatial import Delaunay
 from sklearn.neighbors import NearestNeighbors
+
+# quiet nibabel warning
+# pixdim[1,2,3] should be non-zero; setting 0 dims to 1
+logging.getLogger("nibabel").setLevel(logging.ERROR)
 
 FSLR64K_NUM_VERTICES = 64984
 
