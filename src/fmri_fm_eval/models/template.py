@@ -2,19 +2,46 @@
 
 Instructions:
 
-1. Implement the `ModelWrapper` and optionally `ModelTransform` for the new model.
+1. Create an `fmri_fm_eval` package inside *your* repo
 
-2. Register constructor functions that return a `(transform, model)` pair.
+    ```
+    mkdir -p my_repo/src/fmri_fm_eval/models
+    ```
 
-3. Put the module in *your* source tree:
-
-   ```
-   my_repo/src/fmri_fm_eval/models/new_model.py
-   ```
-
-This will make the model interface for the new model discoverable as a [namespace package
+    This will make your model discoverable to the eval suite as a [namespace package
 plugin](https://packaging.python.org/en/latest/guides/creating-and-discovering-plugins/#using-namespace-packages).
-No need to PR the model! (But you can if you want.)
+
+2. Copy the `template.py` into the new package
+
+    ```
+    cp template.py my_repo/src/fmri_fm_eval/models/my_model.py
+    ```
+
+3. Implement the `ModelWrapper` and optionally `ModelTransform` for the new model.
+
+    You can freely import from your official model code. You do not need to
+    copy/re-implement the entire model.
+
+4. Run the test to validate the model
+
+    ```
+    python -m python -m fmri_fm_eval.models.test_models my_model
+    ```
+
+    If you want to debug your implementation, you can copy the provided `test_models.py`
+    into your source tree and run locally.
+
+5. (Optional) open a PR to add your model to the upstream repo
+
+    Your PR should only include the single model wrapper file
+
+    ```
+    fmri-fm-eval/src/fmri_fm_eval/models/my_model.py
+    ```
+
+    Any extra dependencies needed should be added as optional dependencies for
+    your specific model in the `pyproject.toml`
+    (https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#dependencies-and-requirements).
 """
 
 import torch.nn as nn
