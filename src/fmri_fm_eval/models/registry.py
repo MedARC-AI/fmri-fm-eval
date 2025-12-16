@@ -59,3 +59,7 @@ def import_model_plugins():
             except Exception as exc:
                 _logger.warning(f"Import model plugin {name} failed: {exc}", exc_info=True)
     return plugins
+
+
+# import all discovered plugins to register
+_MODEL_PLUGINS = import_model_plugins()
