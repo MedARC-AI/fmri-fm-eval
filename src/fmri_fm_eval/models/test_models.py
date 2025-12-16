@@ -59,4 +59,7 @@ if __name__ == "__main__":
         filter_args = ["-k", " or ".join(args.model)]
     else:
         filter_args = []
-    pytest.main(filter_args + [__file__])
+    # ignore annoying error due to repeated import of jaxtyping
+    # idk even know why there is a jaxtyping pytest plugin
+    opts = ["-W", "ignore::pytest.PytestAssertRewriteWarning"]
+    pytest.main(filter_args + opts + [__file__])
