@@ -25,7 +25,7 @@ plugin](https://packaging.python.org/en/latest/guides/creating-and-discovering-p
 4. Run the test to validate the model
 
     ```
-    python -m python -m fmri_fm_eval.models.test_models my_model
+    python -m fmri_fm_eval.models.test_models my_model
     ```
 
     If you want to debug your implementation, you can copy the provided `test_models.py`
