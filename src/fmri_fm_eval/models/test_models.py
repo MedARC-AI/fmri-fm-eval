@@ -52,11 +52,18 @@ def test_model(name: str, n_samples: int):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("model", type=str, nargs="*")
+    parser.add_argument(
+        "model",
+        type=str,
+        nargs="*",
+        help=f"model name or pattern (models: {', '.join(list_models())})",
+    )
     args = parser.parse_args()
 
     if args.model:
         filter_args = ["-k", " or ".join(args.model)]
     else:
         filter_args = []
-    pytest.main(filter_args + [__file__])
+    # ignore annoying error due to repeated import of pytest plugins
+    opts = ["-W", "ignore::pytest.PytestAssertRewriteWarning"]
+    pytest.main(filter_args + opts + [__file__])
