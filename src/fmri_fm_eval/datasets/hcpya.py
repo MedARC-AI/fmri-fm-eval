@@ -1,7 +1,11 @@
 import os
 
-from fmri_fm_eval.datasets.base import ArrowDataset
+import datasets as hfds
+
+from fmri_fm_eval.datasets.base import HFDataset
 from fmri_fm_eval.datasets.registry import register_dataset
+
+# TODO: package specific cache dir?
 
 HCPYA_ROOT = os.getenv("HCPYA_ROOT", "s3://medarc/fmri-fm-eval/processed")
 
@@ -31,8 +35,9 @@ def _create_hcpya_rest1lr(space: str, target: str, **kwargs):
     splits = ["train", "validation", "test"]
     for split in splits:
         url = f"{HCPYA_ROOT}/hcpya-rest1lr.{space}.arrow/{split}"
-        dataset = ArrowDataset(
-            url,
+        dataset = hfds.load_dataset("arrow", data_files=f"{url}/*.arrow")
+        dataset = HFDataset(
+            dataset,
             target_map_path=target_map_path,
             target_key=target_key,
             **kwargs,

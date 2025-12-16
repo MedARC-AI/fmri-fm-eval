@@ -49,3 +49,7 @@ def import_dataset_plugins():
             except Exception as exc:
                 _logger.warning(f"Import dataset plugin {name} failed: {exc}", exc_info=True)
     return plugins
+
+
+# import all discovered plugins to register
+_DATASET_PLUGINS = import_dataset_plugins()
