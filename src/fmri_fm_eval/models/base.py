@@ -2,13 +2,17 @@ from typing import Callable, NamedTuple
 
 import torch.nn as nn
 from torch import Tensor
-from jaxtyping import Float
 
 
 class Embeddings(NamedTuple):
-    cls_embeds: Float[Tensor, "B 1 D"] | None
-    reg_embeds: Float[Tensor, "B R D"] | None
-    patch_embeds: Float[Tensor, "B L D"] | None
+    cls_embeds: Tensor | None
+    """cls embeddings [B 1 D]"""
+
+    reg_embeds: Tensor | None
+    """register embeddings [B R D]"""
+
+    patch_embeds: Tensor | None
+    """patch embeddings [B L D]"""
 
 
 class ModelWrapper(nn.Module):
