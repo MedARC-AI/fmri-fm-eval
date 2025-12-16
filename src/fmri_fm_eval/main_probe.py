@@ -210,7 +210,7 @@ def main(args: DictConfig):
             wandb.log(val_stats, (epoch + 1) * args.steps_per_epoch)
 
         hparam, score = get_best_hparams(args, model, val_stats)
-        print(f"Epoch: [{epoch}]  best hparam: {hparam}  best score: {score:.3f}")
+        print(f"epoch: [{epoch}]  best hparam: {hparam}  best score: {score:.3f}")
 
         if score > best_info["score"]:
             best_info = {"score": score, "hparam": hparam, "epoch": epoch}
@@ -218,15 +218,15 @@ def main(args: DictConfig):
         else:
             is_best = False
 
-        hparam_key = f"{model.hparam_id_map[hparam]:03d}_{format_hparam(hparam)}"
+        hparam_fmt = format_hparam(model.hparam_id_map[hparam], hparam)
         best_stats = {
             "eval/validation/lr_scale_best": hparam[0],
             "eval/validation/wd_scale_best": hparam[1],
-            "eval/validation/loss_best": val_stats[f"eval/validation/loss_{hparam_key}"],
+            "eval/validation/loss_best": val_stats[f"eval/validation/loss_{hparam_fmt}"],
         }
         if args.task == "classification":
             best_stats["eval/validation/acc1_best"] = val_stats[
-                f"eval/validation/acc1_{hparam_key}"
+                f"eval/validation/acc1_{hparam_fmt}"
             ]
 
         if log_wandb:
@@ -239,13 +239,13 @@ def main(args: DictConfig):
         ckpt_meta = {"best_info": best_info}
         ut.save_model(args, epoch, model, optimizer, meta=ckpt_meta, is_best=is_best)
 
-    print("Evaluating best model on test set")
+    print("evaluating best model on test set")
     best_ckpt = torch.load(
         output_dir / "checkpoint-best.pth", map_location="cpu", weights_only=True
     )
     model.load_state_dict(best_ckpt["model"])
     best_info = best_ckpt["meta"]["best_info"]
-    print(f"Best model info:\n{json.dumps(best_info)}")
+    print(f"best model info:\n{json.dumps(best_info)}")
 
     test_stats = evaluate(
         args,
@@ -258,22 +258,22 @@ def main(args: DictConfig):
     )
 
     hparam = best_info["hparam"]
-    hparam_key = f"{model.hparam_id_map[hparam]:03d}_{format_hparam(hparam)}"
+    hparam_fmt = format_hparam(model.hparam_id_map[hparam], hparam)
     best_stats = {
         "eval/test/epoch_best": best_info["epoch"],
         "eval/test/lr_scale_best": hparam[0],
         "eval/test/wd_scale_best": hparam[1],
-        "eval/test/loss_best": test_stats[f"eval/test/loss_{hparam_key}"],
+        "eval/test/loss_best": test_stats[f"eval/test/loss_{hparam_fmt}"],
     }
     if args.task == "classification":
-        best_stats["eval/test/acc1_best"] = test_stats[f"eval/test/acc1_{hparam_key}"]
+        best_stats["eval/test/acc1_best"] = test_stats[f"eval/test/acc1_{hparam_fmt}"]
 
-    print(f"Best model test stats:\n{json.dumps(best_stats)}")
+    print(f"best model test stats:\n{json.dumps(best_stats)}")
     with (output_dir / "test_log.json").open("a") as f:
         print(json.dumps(best_stats), file=f)
 
     total_time = time.monotonic() - start_time
-    print(f"done! training time: {datetime.timedelta(seconds=int(total_time))}")
+    print(f"done! total time: {datetime.timedelta(seconds=int(total_time))}")
 
 
 @torch.inference_mode()
@@ -364,7 +364,7 @@ def train_one_epoch(
 
     metric_logger = ut.MetricLogger(delimiter="  ")
     metric_logger.add_meter("lr", ut.SmoothedValue(window_size=1, fmt="{value:.6f}"))
-    header = f"Train: [{epoch}]"
+    header = f"train: [{epoch}]"
     all_meters = defaultdict(ut.SmoothedValue)
 
     num_classifiers = len(model.classifiers)
@@ -413,7 +413,6 @@ def train_one_epoch(
 
         if need_update:
             # grad clip per classifier separately
-            # TODO: clip grad on model without ddp?
             backbone_grad = nn.utils.clip_grad_norm_(model.backbone.parameters(), args.clip_grad)
             all_grad = []
             for clf in model.classifiers:
@@ -435,13 +434,13 @@ def train_one_epoch(
             all_metric_dict = {}
             all_metric_dict.update(
                 {
-                    f"loss_{ii:03d}_{format_hparam(hparam)}": all_loss[ii].item()
+                    f"loss_{format_hparam(ii, hparam)}": all_loss[ii].item()
                     for ii, hparam in enumerate(model.hparams)
                 }
             )
             all_metric_dict.update(
                 {
-                    f"grad_{ii:03d}_{format_hparam(hparam)}": all_grad[ii].item()
+                    f"grad_{format_hparam(ii, hparam)}": all_grad[ii].item()
                     for ii, hparam in enumerate(model.hparams)
                 }
             )
@@ -461,6 +460,8 @@ def train_one_epoch(
     stats = {f"train/{k}": meter.global_avg for k, meter in metric_logger.meters.items()}
     stats.update({f"train/{k}": meter.global_avg for k, meter in all_meters.items()})
     print(f"{header} Averaged stats:", json.dumps(stats), sep="\n")
+
+    # TODO: return preds and targets to compute metrics offline?
     return stats
 
 
@@ -480,7 +481,7 @@ def evaluate(
     epoch_num_batches = len(data_loader) if not args.debug else 10
 
     metric_logger = ut.MetricLogger(delimiter="  ")
-    header = f"Eval ({eval_name}): [{epoch}]"
+    header = f"eval ({eval_name}): [{epoch}]"
 
     num_classifiers = len(model.classifiers)
 
@@ -523,14 +524,14 @@ def evaluate(
     stats = {}
     stats.update(
         {
-            f"loss_{ii:03d}_{format_hparam(hparam)}": total_loss[ii]
+            f"loss_{format_hparam(ii, hparam)}": total_loss[ii]
             for ii, hparam in enumerate(model.hparams)
         }
     )
     if args.task == "classification":
         stats.update(
             {
-                f"acc1_{ii:03d}_{format_hparam(hparam)}": total_acc1[ii]
+                f"acc1_{format_hparam(ii, hparam)}": total_acc1[ii]
                 for ii, hparam in enumerate(model.hparams)
             }
         )
@@ -539,25 +540,17 @@ def evaluate(
     return stats
 
 
-def format_hparam(hparam: tuple[float, float]) -> str:
+def format_hparam(idx: int, hparam: tuple[float, float]) -> str:
     lr, weight_decay = hparam
-    return f"lr{lr:.1e}_wd{weight_decay:.1e}"
+    return f"{idx:03d}_lr{lr:.1e}_wd{weight_decay:.1e}"
 
 
 def get_best_hparams(
-    args: DictConfig,
     model: ClassifierGrid,
     stats: dict[str, float],
 ):
-    if args.task == "classification":
-        metric = "acc1"
-        sign = 1
-    else:
-        metric = "loss"
-        sign = -1
-
     scores = [
-        sign * stats[f"eval/validation/{metric}_{ii:03d}_{format_hparam(hparam)}"]
+        -stats[f"eval/validation/loss_{format_hparam(ii, hparam)}"]
         for ii, hparam in enumerate(model.hparams)
     ]
     best_id = np.argmax(scores)
