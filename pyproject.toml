@@ -25,6 +25,8 @@ dependencies = [
     "pre-commit",
     "pycortex",
     "pytest",
+    "python-dotenv",
+    "s3fs",
     "scikit-learn",
     "torch",
     "tqdm",
