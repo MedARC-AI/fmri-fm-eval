@@ -20,6 +20,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import wandb
+from cloudpathlib import S3Path
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 
@@ -30,12 +31,8 @@ from fmri_fm_eval.heads import (
     AttnPoolClassifier,
     pool_representation,
 )
-from fmri_fm_eval.models.registry import create_model, import_model_plugins
-from fmri_fm_eval.datasets.registry import create_dataset, import_dataset_plugins
-
-# register all available models and datasets
-import_model_plugins()
-import_dataset_plugins()
+from fmri_fm_eval.models.registry import create_model
+from fmri_fm_eval.datasets.registry import create_dataset
 
 DEFAULT_CONFIG = Path(__file__).parent / "config/default_probe.yaml"
 
@@ -47,9 +44,15 @@ def main(args: DictConfig):
     device = torch.device(args.device)
     ut.random_seed(args.seed)
 
-    if args.name and not args.output_dir.endswith(args.name):
-        args.output_dir = f"{args.output_dir}/{args.name}"
+    args.name = f"{args.name_prefix}/{args.model}/{args.representation}/{args.dataset}"
+    args.output_dir = f"{args.output_root}/{args.name}"
     output_dir = Path(args.output_dir)
+
+    # remote backup location
+    if args.remote_root:
+        args.remote_dir = f"{args.remote_root}/{args.name}"
+        if S3Path(args.remote_dir).exists():
+            ut.rsync(args.remote_dir, args.output_dir)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     out_cfg_path = output_dir / "config.yaml"
@@ -103,7 +106,8 @@ def main(args: DictConfig):
         transform=transform,
         **(args.dataset_kwargs or {}),
     )
-    num_classes = dataset_dict["train"].__num_classes__
+    args.num_classes = dataset_dict["train"].__num_classes__
+    args.task = dataset_dict["train"].__task__
 
     loaders_dict = {}
     for split, dataset in dataset_dict.items():
@@ -122,14 +126,14 @@ def main(args: DictConfig):
 
     # prediction heads
     print("running backbone on example batch to get embedding shape")
-    embed_shape = get_embedding_shape(backbone, args.representation, train_loader, device)
+    embed_shape = get_embedding_shape(backbone, args.representation, val_loader, device)
     print(f"embedding feature shape: {args.representation}: {embed_shape}")
 
     print("initializing sweep of classifier heads")
     classifiers, classifier_param_groups = make_classifiers(
         args,
         embed_shape,
-        num_classes=num_classes,
+        num_classes=args.num_classes,
     )
     model = ClassifierGrid(backbone, args.representation, classifiers)
     model.to(device)
@@ -155,16 +159,11 @@ def main(args: DictConfig):
     ut.update_lr(param_groups, args.lr)
     ut.update_wd(param_groups, args.weight_decay)
     # cast or else it corrupts the checkpoint
-    betas = tuple(args.betas) if args.betas is not None else None
-    optimizer = torch.optim.AdamW(param_groups, betas=betas)
+    optimizer = torch.optim.AdamW(param_groups)
 
     total_steps = args.epochs * args.steps_per_epoch
-    lr_schedule = ut.WarmupThenCosine(
-        base_value=args.lr,
-        final_value=args.min_lr,
-        total_iters=total_steps,
-        warmup_iters=args.warmup_steps,
-    )
+    warmup_steps = args.warmup_epochs * args.steps_per_epoch
+    lr_schedule = make_lr_schedule(args.lr, total_steps, warmup_steps)
 
     # load checkpoint/resume training
     ckpt_meta = ut.load_model(args, model, optimizer)
@@ -239,6 +238,10 @@ def main(args: DictConfig):
         ckpt_meta = {"best_info": best_info}
         ut.save_model(args, epoch, model, optimizer, meta=ckpt_meta, is_best=is_best)
 
+        if args.remote_dir:
+            print(f"backing up to remote: {args.remote_dir}")
+            ut.rsync(args.remote_dir, output_dir)
+
     print("evaluating best model on test set")
     best_ckpt = torch.load(
         output_dir / "checkpoint-best.pth", map_location="cpu", weights_only=True
@@ -274,6 +277,10 @@ def main(args: DictConfig):
 
     total_time = time.monotonic() - start_time
     print(f"done! total time: {datetime.timedelta(seconds=int(total_time))}")
+
+    if args.remote_dir:
+        print(f"backing up to remote: {args.remote_dir}")
+        ut.rsync(args.remote_dir, output_dir)
 
 
 @torch.inference_mode()
@@ -344,6 +351,14 @@ def make_classifiers(
 
     param_groups = list(param_groups.values())
     return all_classifiers, param_groups
+
+
+def make_lr_schedule(base_lr: float, total_steps: int, warmup_steps: int):
+    warmup = np.linspace(0.0, 1.0, warmup_steps)
+    decay = np.cos(np.linspace(0, np.pi, total_steps - warmup_steps))
+    decay = (decay + 1) / 2
+    lr_schedule = base_lr * np.concatenate([warmup, decay])
+    return lr_schedule
 
 
 def train_one_epoch(
@@ -460,8 +475,6 @@ def train_one_epoch(
     stats = {f"train/{k}": meter.global_avg for k, meter in metric_logger.meters.items()}
     stats.update({f"train/{k}": meter.global_avg for k, meter in all_meters.items()})
     print(f"{header} Averaged stats:", json.dumps(stats), sep="\n")
-
-    # TODO: return preds and targets to compute metrics offline?
     return stats
 
 
@@ -537,6 +550,8 @@ def evaluate(
         )
 
     stats = {f"eval/{eval_name}/{k}": v for k, v in stats.items()}
+
+    # TODO: return preds and targets to compute metrics offline?
     return stats
 
 
