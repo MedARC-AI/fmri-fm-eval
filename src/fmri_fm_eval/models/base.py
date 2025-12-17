@@ -23,12 +23,6 @@ class ModelWrapper(nn.Module):
     __space__: str
     """Expected input data space."""
 
-    __train_params__: list[str] | None
-    """List of param names or glob patterns to unfreeze."""
-
-    __no_decay_params__: list[str] | None
-    """List of param names or glob patterns to exclude from weight decay."""
-
     def forward(self, batch: dict[str, Tensor]) -> Embeddings: ...
 
 

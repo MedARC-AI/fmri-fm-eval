@@ -6,7 +6,6 @@
 
 import argparse
 import datetime
-import fnmatch
 import json
 import math
 import time
@@ -82,23 +81,11 @@ def main(args: DictConfig):
     print("config:", OmegaConf.to_yaml(args), sep="\n")
 
     # backbone model
-    print(f"creating backbone model: {args.model}")
+    print(f"creating frozen backbone model: {args.model}")
     transform, backbone = create_model(args.model, **(args.model_kwargs or {}))
-    backbone.to(device)
-
     backbone.requires_grad_(False)
-    train_params = getattr(backbone, "__train_params__", None)
-    if train_params:
-        print(f"unfreezing params: {train_params}")
-        for name, p in backbone.named_parameters():
-            if any(fnmatch(name, pat) for pat in train_params):
-                p.requires_grad_(True)
-    backbone_param_groups = ut.get_param_groups(backbone)
-
+    backbone.to(device)
     print(f"backbone:\n{backbone}")
-    num_params = sum(p.numel() for p in backbone.parameters())
-    num_params_train = sum(p.numel() for p in backbone.parameters() if p.requires_grad)
-    print(f"backbone params (train): {num_params / 1e6:.1f}M ({num_params_train / 1e6:.1f}M)")
 
     # dataset
     print(f"creating dataset: {args.dataset} ({backbone.__space__})")
@@ -133,11 +120,7 @@ def main(args: DictConfig):
     print(f"embedding feature shape: {args.representation}: {embed_shape}")
 
     print("initializing sweep of classifier heads")
-    classifiers, classifier_param_groups = make_classifiers(
-        args,
-        embed_shape,
-        num_classes=args.num_classes,
-    )
+    classifiers, param_groups = make_classifiers(args, embed_shape, args.num_classes)
     model = ClassifierGrid(backbone, args.representation, classifiers)
     model.to(device)
     print(f"classifiers:\n{model.classifiers}")
@@ -159,7 +142,6 @@ def main(args: DictConfig):
     else:
         print(f"lr: {args.lr:.2e}")
 
-    param_groups = backbone_param_groups + classifier_param_groups
     ut.update_lr(param_groups, args.lr)
     ut.update_wd(param_groups, args.weight_decay)
     optimizer = torch.optim.AdamW(param_groups)
@@ -390,7 +372,6 @@ def train_one_epoch(
     all_meters = defaultdict(ut.SmoothedValue)
 
     num_classifiers = len(model.classifiers)
-    backbone_has_params = any(True for p in model.backbone.parameters() if p.requires_grad)
 
     data_loader = ut.infinite_data_wrapper(data_loader)
     optimizer.zero_grad()
@@ -441,10 +422,6 @@ def train_one_epoch(
                 grad = nn.utils.clip_grad_norm_(clf.parameters(), args.clip_grad)
                 all_grad.append(grad)
             total_grad = torch.stack(all_grad).norm()
-            if backbone_has_params:
-                backbone_grad = nn.utils.clip_grad_norm_(
-                    model.backbone.parameters(), args.clip_grad
-                )
             optimizer.step()
             optimizer.zero_grad()
 
@@ -454,8 +431,6 @@ def train_one_epoch(
                 "loss": loss_value,
                 "grad": total_grad.item(),
             }
-            if backbone_has_params:
-                log_metric_dict["backbone_grad"] = backbone_grad.item()
             metric_logger.update(**log_metric_dict)
 
             all_metric_dict = {}
