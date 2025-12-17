@@ -28,6 +28,7 @@ dependencies = [
     "python-dotenv",
     "s3fs",
     "scikit-learn",
+    "tabulate",
     "torch",
     "tqdm",
     "wandb",
