@@ -19,14 +19,11 @@ import time
 from collections import defaultdict, deque
 from omegaconf import OmegaConf
 from pathlib import Path
+from urllib.parse import urlparse
 
 import numpy as np
 import torch
 import torch.distributed as dist
-import torch.nn as nn
-from torch import Tensor
-from torch.amp import GradScaler
-from torch.optim import Optimizer
 
 
 # these very useful utils copied from deit with only minor changes
@@ -290,7 +287,6 @@ def save_model(
     args, epoch, model_without_ddp, optimizer, loss_scaler=None, meta=None, is_best=None
 ):
     output_dir = Path(args.output_dir)
-    checkpoint_path = output_dir / f"checkpoint-{epoch:05d}.pth"
     last_checkpoint_path = output_dir / "checkpoint-last.pth"
     best_checkpoint_path = output_dir / "checkpoint-best.pth"
 
@@ -310,17 +306,6 @@ def save_model(
     if is_best:
         print(f"saving best checkpoint {best_checkpoint_path}")
         save_on_master(to_save, best_checkpoint_path)
-
-    if args.checkpoint_period and epoch % args.checkpoint_period == 0:
-        print(f"saving checkpoint {checkpoint_path}")
-        save_on_master(to_save, checkpoint_path)
-
-    if args.max_checkpoints and is_main_process():
-        all_checkpoints = sorted(output_dir.glob("checkpoint-[0-9]*.pth"))
-        del_count = max(0, len(all_checkpoints) - args.max_checkpoints)
-        for checkpoint_path in all_checkpoints[:del_count]:
-            print(f"removing checkpoint {checkpoint_path}")
-            checkpoint_path.unlink()
 
 
 def load_model(args, model_without_ddp, optimizer, loss_scaler=None):
@@ -349,81 +334,18 @@ def load_model(args, model_without_ddp, optimizer, loss_scaler=None):
     return meta
 
 
+def rsync(src_path: str, dst_path: str):
+    src_path = str(src_path)
+    dst_path = str(dst_path)
+    assert all(urlparse(p).scheme in {"", "s3"} for p in [src_path, dst_path]), (
+        "only local and s3 paths supported"
+    )
+
+    cmd = ["aws", "s3", "sync", src_path, dst_path]
+    subprocess.run(cmd, check=True)
+
+
 # optimization utils
-
-
-# from capi
-class WarmupThenCosine:
-    def __init__(
-        self,
-        base_value: float,
-        final_value: float,
-        total_iters: int,
-        warmup_iters: int = 0,
-        start_warmup_value: float = 0.0,
-        freeze_iters: int = 0,
-        truncate_cos: float = 1.0,
-    ):
-        super().__init__()
-        self.final_value = final_value
-        self.total_iters = total_iters
-
-        freeze_schedule = np.zeros(freeze_iters)
-
-        warmup_schedule = np.linspace(start_warmup_value, base_value, warmup_iters)
-
-        iters = np.arange(total_iters - warmup_iters - freeze_iters)
-        schedule = final_value + 0.5 * (base_value - final_value) * (
-            1 + np.cos(np.pi * truncate_cos * iters / len(iters))
-        )
-        self.schedule = np.concatenate((freeze_schedule, warmup_schedule, schedule))
-        assert len(self.schedule) == self.total_iters
-
-    def __getitem__(self, it: int) -> float:
-        if it >= self.total_iters:
-            return self.final_value
-        # cast to float or else it can corrupt the checkpoint
-        return float(self.schedule[it])
-
-
-# adapted from timm backward logic
-# https://github.com/huggingface/pytorch-image-models/blob/main/timm/utils/cuda.py
-def backward_step(
-    loss: Tensor,
-    optimizer: Optimizer,
-    scaler: GradScaler = None,
-    need_update: bool = True,
-    max_norm: float | None = None,
-) -> Tensor | None:
-    if scaler is not None:
-        scaler.scale(loss).backward()
-    else:
-        loss.backward()
-
-    if need_update:
-        if scaler is not None:
-            scaler.unscale_(optimizer)
-
-        total_norm = clip_grad(optimizer, max_norm)
-
-        if scaler is not None:
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            optimizer.step()
-        optimizer.zero_grad()
-    else:
-        total_norm = None
-    return total_norm
-
-
-def clip_grad(optimizer: Optimizer, max_norm: float | None = None) -> Tensor:
-    params = [p for group in optimizer.param_groups for p in group["params"]]
-    if max_norm:
-        total_norm = nn.utils.clip_grad_norm_(params, max_norm=max_norm)
-    else:
-        total_norm = nn.utils.get_total_norm(params)
-    return total_norm
 
 
 def get_param_groups(model):
