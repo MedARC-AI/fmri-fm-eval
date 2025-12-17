@@ -34,6 +34,7 @@ attn_pool_embed_dim: null
 
 # Dataset
 dataset: hcpya_rest1lr_gender
+dataset_kwargs: {}
 
 # Grid of learning rate and weight decay scale factors for classifier grid.
 lr_scale_grid: [0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0]

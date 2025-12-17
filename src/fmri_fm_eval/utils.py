@@ -328,7 +328,7 @@ def load_model(args, model_without_ddp, optimizer, loss_scaler=None):
             if loss_scaler is not None:
                 loss_scaler.load_state_dict(ckpt["scaler"])
             args.start_epoch = ckpt["epoch"] + 1
-            meta = ckpt.get("meta")
+            meta = ckpt["meta"]
             print(f"loaded optimizer state, resuming training from {args.start_epoch}")
 
     return meta
@@ -381,11 +381,15 @@ def get_param_groups(model):
 
 
 def update_lr(param_groups, lr: float):
+    # cast to float or else np scalars corrupt checkpoint
+    lr = float(lr)
     for group in param_groups:
         group["lr"] = lr * group["lr_multiplier"]
 
 
-def update_wd(param_groups, weight_decay: float | None = None):
+def update_wd(param_groups, weight_decay: float):
+    # cast to float or else np scalars corrupt checkpoint
+    weight_decay = float(weight_decay)
     for group in param_groups:
         group["weight_decay"] = weight_decay * group["wd_multiplier"]
 

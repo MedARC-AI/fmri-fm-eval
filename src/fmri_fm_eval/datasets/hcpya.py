@@ -35,14 +35,14 @@ def _create_hcpya_rest1lr(space: str, target: str, **kwargs):
     splits = ["train", "validation", "test"]
     for split in splits:
         url = f"{HCPYA_ROOT}/hcpya-rest1lr.{space}.arrow/{split}"
-        dataset = hfds.load_dataset("arrow", data_files=f"{url}/*.arrow", split="train")
+        dataset = hfds.load_dataset("arrow", data_files=f"{url}/*.arrow", split="train", **kwargs)
         dataset = HFDataset(
             dataset,
             target_map_path=target_map_path,
             target_key=target_key,
-            **kwargs,
         )
         dataset.__num_classes__ = HCPYA_TARGET_NUM_CLASSES[target]
+        dataset.__task__ = "classification"
 
         dataset_dict[split] = dataset
 
@@ -51,24 +51,24 @@ def _create_hcpya_rest1lr(space: str, target: str, **kwargs):
 
 @register_dataset
 def hcpya_rest1lr_age(space: str, **kwargs):
-    return _create_hcpya_rest1lr(space, target="age")
+    return _create_hcpya_rest1lr(space, target="age", **kwargs)
 
 
 @register_dataset
 def hcpya_rest1lr_gender(space: str, **kwargs):
-    return _create_hcpya_rest1lr(space, target="gender")
+    return _create_hcpya_rest1lr(space, target="gender", **kwargs)
 
 
 @register_dataset
 def hcpya_rest1lr_flanker(space: str, **kwargs):
-    return _create_hcpya_rest1lr(space, target="flanker")
+    return _create_hcpya_rest1lr(space, target="flanker", **kwargs)
 
 
 @register_dataset
 def hcpya_rest1lr_neofacn(space: str, **kwargs):
-    return _create_hcpya_rest1lr(space, target="neofacn")
+    return _create_hcpya_rest1lr(space, target="neofacn", **kwargs)
 
 
 @register_dataset
 def hcpya_rest1lr_pmat24(space: str, **kwargs):
-    return _create_hcpya_rest1lr(space, target="pmat24")
+    return _create_hcpya_rest1lr(space, target="pmat24", **kwargs)

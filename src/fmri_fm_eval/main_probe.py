@@ -53,6 +53,8 @@ def main(args: DictConfig):
         args.remote_dir = f"{args.remote_root}/{args.name}"
         if S3Path(args.remote_dir).exists():
             ut.rsync(args.remote_dir, args.output_dir)
+    else:
+        args.remote_dir = None
 
     output_dir.mkdir(parents=True, exist_ok=True)
     out_cfg_path = output_dir / "config.yaml"
@@ -85,7 +87,7 @@ def main(args: DictConfig):
     backbone.to(device)
 
     backbone.requires_grad_(False)
-    train_params = getattr(backbone, "__train_params__")
+    train_params = getattr(backbone, "__train_params__", None)
     if train_params:
         print(f"unfreezing params: {train_params}")
         for name, p in backbone.named_parameters():
@@ -101,13 +103,15 @@ def main(args: DictConfig):
     # dataset
     print(f"creating dataset: {args.dataset} ({backbone.__space__})")
     dataset_dict = create_dataset(
-        args.dataset,
-        space=backbone.__space__,
-        transform=transform,
-        **(args.dataset_kwargs or {}),
+        args.dataset, space=backbone.__space__, **(args.dataset_kwargs or {})
     )
     args.num_classes = dataset_dict["train"].__num_classes__
     args.task = dataset_dict["train"].__task__
+    for split, ds in dataset_dict.items():
+        print(f"{split} (n={len(ds)}):\n{ds}\n")
+
+    for split, ds in dataset_dict.items():
+        ds.set_transform(transform)
 
     loaders_dict = {}
     for split, dataset in dataset_dict.items():
@@ -116,7 +120,6 @@ def main(args: DictConfig):
             batch_size=args.batch_size,
             shuffle=split == "train",
             num_workers=args.num_workers,
-            pin_memory=args.pin_memory,
         )
     # we could also support more splits or different split names, but for now can keep
     # things simple.
@@ -126,7 +129,7 @@ def main(args: DictConfig):
 
     # prediction heads
     print("running backbone on example batch to get embedding shape")
-    embed_shape = get_embedding_shape(backbone, args.representation, val_loader, device)
+    embed_shape = get_embedding_shape(backbone, args.representation, dataset_dict["train"], device)
     print(f"embedding feature shape: {args.representation}: {embed_shape}")
 
     print("initializing sweep of classifier heads")
@@ -143,6 +146,7 @@ def main(args: DictConfig):
     print(f"classifier params (train): {num_params / 1e6:.1f}M ({num_params_train / 1e6:.1f}M)")
 
     # optimizer
+    print("setting up optimizer")
     total_batch_size = args.batch_size * args.accum_iter
     print(
         f"total batch size: {total_batch_size} = "
@@ -158,19 +162,20 @@ def main(args: DictConfig):
     param_groups = backbone_param_groups + classifier_param_groups
     ut.update_lr(param_groups, args.lr)
     ut.update_wd(param_groups, args.weight_decay)
-    # cast or else it corrupts the checkpoint
     optimizer = torch.optim.AdamW(param_groups)
 
     total_steps = args.epochs * args.steps_per_epoch
     warmup_steps = args.warmup_epochs * args.steps_per_epoch
     lr_schedule = make_lr_schedule(args.lr, total_steps, warmup_steps)
+    print(f"full schedule: epochs = {args.epochs} (steps = {total_steps})")
+    print(f"warmup: epochs = {args.warmup_epochs} (steps = {warmup_steps})")
 
     # load checkpoint/resume training
     ckpt_meta = ut.load_model(args, model, optimizer)
     if ckpt_meta is not None:
         best_info = ckpt_meta["best_info"]
     else:
-        best_info = {"score": -float("inf"), "hparam": None, "epoch": None}
+        best_info = {"loss": float("inf"), "hparam": None, "epoch": None}
 
     # training loss
     if args.task == "classification":
@@ -208,11 +213,11 @@ def main(args: DictConfig):
         if log_wandb:
             wandb.log(val_stats, (epoch + 1) * args.steps_per_epoch)
 
-        hparam, score = get_best_hparams(args, model, val_stats)
-        print(f"epoch: [{epoch}]  best hparam: {hparam}  best score: {score:.3f}")
+        hparam, loss = get_best_hparams(model, val_stats)
+        print(f"epoch: [{epoch}]  best hparam: {hparam}  best loss: {loss:.3f}")
 
-        if score > best_info["score"]:
-            best_info = {"score": score, "hparam": hparam, "epoch": epoch}
+        if loss < best_info["loss"]:
+            best_info = {"loss": loss, "hparam": hparam, "epoch": epoch}
             is_best = True
         else:
             is_best = False
@@ -287,9 +292,10 @@ def main(args: DictConfig):
 def get_embedding_shape(
     backbone: nn.Module,
     representation: str,
-    loader: Iterable,
+    dataset: torch.utils.data.Dataset,
     device: torch.device,
 ):
+    loader = DataLoader(dataset, batch_size=1)
     example_batch = next(iter(loader))
     example_batch = ut.send_data(example_batch, device)
 
@@ -355,9 +361,10 @@ def make_classifiers(
 
 def make_lr_schedule(base_lr: float, total_steps: int, warmup_steps: int):
     warmup = np.linspace(0.0, 1.0, warmup_steps)
-    decay = np.cos(np.linspace(0, np.pi, total_steps - warmup_steps))
+    decay = np.cos(np.linspace(0, np.pi, max(total_steps - warmup_steps, 0)))
     decay = (decay + 1) / 2
     lr_schedule = base_lr * np.concatenate([warmup, decay])
+    lr_schedule = lr_schedule[:total_steps]
     return lr_schedule
 
 
@@ -383,6 +390,7 @@ def train_one_epoch(
     all_meters = defaultdict(ut.SmoothedValue)
 
     num_classifiers = len(model.classifiers)
+    backbone_has_params = any(True for p in model.backbone.parameters() if p.requires_grad)
 
     data_loader = ut.infinite_data_wrapper(data_loader)
     optimizer.zero_grad()
@@ -428,12 +436,15 @@ def train_one_epoch(
 
         if need_update:
             # grad clip per classifier separately
-            backbone_grad = nn.utils.clip_grad_norm_(model.backbone.parameters(), args.clip_grad)
             all_grad = []
             for clf in model.classifiers:
                 grad = nn.utils.clip_grad_norm_(clf.parameters(), args.clip_grad)
                 all_grad.append(grad)
-            total_grad = torch.stack([backbone_grad] + all_grad).norm()
+            total_grad = torch.stack(all_grad).norm()
+            if backbone_has_params:
+                backbone_grad = nn.utils.clip_grad_norm_(
+                    model.backbone.parameters(), args.clip_grad
+                )
             optimizer.step()
             optimizer.zero_grad()
 
@@ -442,8 +453,9 @@ def train_one_epoch(
                 "lr": lr,
                 "loss": loss_value,
                 "grad": total_grad.item(),
-                "backbone_grad": backbone_grad.item(),
             }
+            if backbone_has_params:
+                log_metric_dict["backbone_grad"] = backbone_grad.item()
             metric_logger.update(**log_metric_dict)
 
             all_metric_dict = {}
@@ -474,7 +486,6 @@ def train_one_epoch(
 
     stats = {f"train/{k}": meter.global_avg for k, meter in metric_logger.meters.items()}
     stats.update({f"train/{k}": meter.global_avg for k, meter in all_meters.items()})
-    print(f"{header} Averaged stats:", json.dumps(stats), sep="\n")
     return stats
 
 
@@ -521,8 +532,6 @@ def evaluate(
         if use_cuda:
             torch.cuda.synchronize()
 
-    print(f"{header} Summary:", metric_logger)
-
     # average loss and acc over the full eval dataset
     preds = torch.cat(preds)
     targets = torch.cat(targets)
@@ -560,18 +569,15 @@ def format_hparam(idx: int, hparam: tuple[float, float]) -> str:
     return f"{idx:03d}_lr{lr:.1e}_wd{weight_decay:.1e}"
 
 
-def get_best_hparams(
-    model: ClassifierGrid,
-    stats: dict[str, float],
-):
-    scores = [
-        -stats[f"eval/validation/loss_{format_hparam(ii, hparam)}"]
+def get_best_hparams(model: ClassifierGrid, stats: dict[str, float]):
+    losses = [
+        stats[f"eval/validation/loss_{format_hparam(ii, hparam)}"]
         for ii, hparam in enumerate(model.hparams)
     ]
-    best_id = np.argmax(scores)
+    best_id = np.argmin(losses)
     best_hparam = model.hparams[best_id]
-    best_score = scores[best_id]
-    return best_hparam, best_score
+    best_loss = losses[best_id]
+    return best_hparam, best_loss
 
 
 if __name__ == "__main__":
