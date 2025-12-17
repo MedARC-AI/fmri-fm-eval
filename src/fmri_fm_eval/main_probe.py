@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import wandb
@@ -112,7 +113,6 @@ def main(args: DictConfig):
     # things simple.
     train_loader = loaders_dict["train"]
     val_loader = loaders_dict["validation"]
-    test_loader = loaders_dict["test"]
 
     # prediction heads
     print("running backbone on example batch to get embedding shape")
@@ -157,7 +157,7 @@ def main(args: DictConfig):
     if ckpt_meta is not None:
         best_info = ckpt_meta["best_info"]
     else:
-        best_info = {"loss": float("inf"), "hparam": None, "epoch": None}
+        best_info = {"loss": float("inf")}
 
     # training loss
     if args.task == "classification":
@@ -195,41 +195,42 @@ def main(args: DictConfig):
         if log_wandb:
             wandb.log(val_stats, (epoch + 1) * args.steps_per_epoch)
 
-        hparam, loss = get_best_hparams(model, val_stats)
-        print(f"epoch: [{epoch}]  best hparam: {hparam}  best loss: {loss:.3f}")
+        hparam_id, hparam, loss = get_best_hparams(model, val_stats)
+        hparam_fmt = format_hparam(hparam_id, hparam)
+        print(
+            f"cv: [{epoch}]  best hparam: {hparam} ({hparam_id:03d}) ('{hparam_fmt}')  loss: {loss:.3f}"
+        )
 
-        if loss < best_info["loss"]:
-            best_info = {"loss": loss, "hparam": hparam, "epoch": epoch}
-            is_best = True
-        else:
-            is_best = False
-
-        hparam_fmt = format_hparam(model.hparam_id_map[hparam], hparam)
         best_stats = {
-            "eval/validation/lr_scale_best": hparam[0],
-            "eval/validation/wd_scale_best": hparam[1],
-            "eval/validation/loss_best": val_stats[f"eval/validation/loss_{hparam_fmt}"],
+            "id_best": hparam_id,
+            "lr_best": hparam[0] * args.lr,
+            "wd_best": hparam[1] * args.weight_decay,
+            "train/loss_best": train_stats[f"train/loss_{hparam_fmt}"],
+            "validation/loss_best": val_stats[f"validation/loss_{hparam_fmt}"],
         }
         if args.task == "classification":
-            best_stats["eval/validation/acc1_best"] = val_stats[
-                f"eval/validation/acc1_{hparam_fmt}"
-            ]
+            best_stats["validation/acc1_best"] = val_stats[f"validation/acc1_{hparam_fmt}"]
 
         if log_wandb:
             wandb.log(best_stats, (epoch + 1) * args.steps_per_epoch)
 
         merged_stats = {"epoch": epoch, **train_stats, **val_stats, **best_stats}
-        with (output_dir / "log.json").open("a") as f:
+        with (output_dir / "train_log.json").open("a") as f:
             print(json.dumps(merged_stats), file=f)
 
-        ckpt_meta = {"best_info": best_info}
-        ut.save_model(args, epoch, model, optimizer, meta=ckpt_meta, is_best=is_best)
+        if loss < best_info["loss"]:
+            best_info = {"loss": loss, "hparam": hparam, "hparam_id": hparam_id, "epoch": epoch}
+            is_best = True
+        else:
+            is_best = False
+
+        ut.save_model(args, epoch, model, optimizer, meta={"best_info": best_info}, is_best=is_best)
 
         if args.remote_dir:
             print(f"backing up to remote: {args.remote_dir}")
             ut.rsync(args.remote_dir, output_dir)
 
-    print("evaluating best model on test set")
+    print("evaluating best model")
     best_ckpt = torch.load(
         output_dir / "checkpoint-best.pth", map_location="cpu", weights_only=True
     )
@@ -237,30 +238,55 @@ def main(args: DictConfig):
     best_info = best_ckpt["meta"]["best_info"]
     print(f"best model info:\n{json.dumps(best_info)}")
 
-    test_stats = evaluate(
-        args,
-        model,
-        criterion,
-        test_loader,
-        best_info["epoch"],
-        device,
-        eval_name="test",
-    )
+    hparam_id, hparam = best_info["hparam_id"], best_info["hparam"]
+    hparam_fmt = format_hparam(hparam_id, hparam)
 
-    hparam = best_info["hparam"]
-    hparam_fmt = format_hparam(model.hparam_id_map[hparam], hparam)
-    best_stats = {
-        "eval/test/epoch_best": best_info["epoch"],
-        "eval/test/lr_scale_best": hparam[0],
-        "eval/test/wd_scale_best": hparam[1],
-        "eval/test/loss_best": test_stats[f"eval/test/loss_{hparam_fmt}"],
+    header = {
+        "model": args.model,
+        "representation": args.representation,
+        "dataset": args.dataset,
+        "epoch": best_info["epoch"],
+        "lr": hparam[0] * args.lr,
+        "wd": hparam[1] * args.weight_decay,
+        "hparam_id": hparam_id,
+        "hparam": json.dumps(hparam),
     }
-    if args.task == "classification":
-        best_stats["eval/test/acc1_best"] = test_stats[f"eval/test/acc1_{hparam_fmt}"]
+    eval_stats = {
+        "eval/epoch_best": header["epoch"],
+        "eval/id_best": header["hparam_id"],
+        "eval/lr_best": header["lr"],
+        "eval/wd_best": header["wd"],
+    }
+    table = []
 
-    print(f"best model test stats:\n{json.dumps(best_stats)}")
-    with (output_dir / "test_log.json").open("a") as f:
-        print(json.dumps(best_stats), file=f)
+    for split, loader in loaders_dict.items():
+        stats = evaluate(
+            args,
+            model,
+            criterion,
+            loader,
+            args.epochs,
+            device,
+            eval_name=split,
+        )
+        record = {**header, "split": split}
+
+        record["loss"] = eval_stats[f"eval/{split}/loss"] = stats[f"{split}/loss_{hparam_fmt}"]
+        if args.task == "classification":
+            record["acc1"] = eval_stats[f"eval/{split}/acc1"] = stats[f"{split}/acc1_{hparam_fmt}"]
+
+        table.append(record)
+
+    table = pd.DataFrame.from_records(table)
+    table_fmt = table.to_markdown(index=False, floatfmt=".5g")
+    print(f"eval results:\n\n{table_fmt}\n\n")
+    table.to_csv(output_dir / "eval_table.csv", index=False)
+
+    with (output_dir / "eval_log.json").open("w") as f:
+        print(json.dumps(eval_stats), file=f)
+
+    if log_wandb:
+        wandb.log(eval_stats, args.epochs * args.steps_per_epoch)
 
     total_time = time.monotonic() - start_time
     print(f"done! total time: {datetime.timedelta(seconds=int(total_time))}")
@@ -477,7 +503,9 @@ def evaluate(
     model.eval()
     use_cuda = device.type == "cuda"
     print_freq = args.get("print_freq", 20) if not args.debug else 1
-    epoch_num_batches = len(data_loader) if not args.debug else 10
+    epoch_num_batches = len(data_loader)
+    if args.debug:
+        epoch_num_batches = min(epoch_num_batches, 10)
 
     metric_logger = ut.MetricLogger(delimiter="  ")
     header = f"eval ({eval_name}): [{epoch}]"
@@ -533,7 +561,7 @@ def evaluate(
             }
         )
 
-    stats = {f"eval/{eval_name}/{k}": v for k, v in stats.items()}
+    stats = {f"{eval_name}/{k}": v for k, v in stats.items()}
 
     # TODO: return preds and targets to compute metrics offline?
     return stats
@@ -546,13 +574,13 @@ def format_hparam(idx: int, hparam: tuple[float, float]) -> str:
 
 def get_best_hparams(model: ClassifierGrid, stats: dict[str, float]):
     losses = [
-        stats[f"eval/validation/loss_{format_hparam(ii, hparam)}"]
+        stats[f"validation/loss_{format_hparam(ii, hparam)}"]
         for ii, hparam in enumerate(model.hparams)
     ]
-    best_id = np.argmin(losses)
+    best_id = int(np.argmin(losses))
     best_hparam = model.hparams[best_id]
     best_loss = losses[best_id]
-    return best_hparam, best_loss
+    return best_id, best_hparam, best_loss
 
 
 if __name__ == "__main__":
