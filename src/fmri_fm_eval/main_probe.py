@@ -117,7 +117,7 @@ def main(args: DictConfig):
     # prediction heads
     print("running backbone on example batch to get embedding shape")
     embed_shape = get_embedding_shape(backbone, args.representation, dataset_dict["train"], device)
-    print(f"embedding feature shape: {args.representation}: {embed_shape}")
+    print(f"embedding feature shape ({args.representation}): {embed_shape}")
 
     print("initializing sweep of classifier heads")
     classifiers, param_groups = make_classifiers(args, embed_shape, args.num_classes)
@@ -311,7 +311,7 @@ def get_embedding_shape(
     pooled = pool_representation(
         cls_embeds, reg_embeds, patch_embeds, representation=representation
     )
-    embed_shape = pooled.shape[1:]
+    embed_shape = tuple(pooled.shape[1:])
     return embed_shape
 
 
