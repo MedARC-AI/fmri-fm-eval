@@ -31,8 +31,8 @@ from fmri_fm_eval.heads import (
     AttnPoolClassifier,
     pool_representation,
 )
-from fmri_fm_eval.models.registry import create_model
-from fmri_fm_eval.datasets.registry import create_dataset
+from fmri_fm_eval.models.registry import create_model, list_models
+from fmri_fm_eval.datasets.registry import create_dataset, list_datasets
 
 DEFAULT_CONFIG = Path(__file__).parent / "config/default_probe.yaml"
 
@@ -153,7 +153,8 @@ def main(args: DictConfig):
     print(f"warmup: epochs = {args.warmup_epochs} (steps = {warmup_steps})")
 
     # load checkpoint/resume training
-    ckpt_meta = ut.load_model(args, model, optimizer)
+    # checkpoint only includes classifiers since backbone is frozen to save space
+    ckpt_meta = load_model(args, model.classifiers, optimizer)
     if ckpt_meta is not None:
         best_info = ckpt_meta["best_info"]
     else:
@@ -224,7 +225,14 @@ def main(args: DictConfig):
         else:
             is_best = False
 
-        ut.save_model(args, epoch, model, optimizer, meta={"best_info": best_info}, is_best=is_best)
+        save_model(
+            args,
+            epoch,
+            model.classifiers,
+            optimizer,
+            meta={"best_info": best_info},
+            is_best=is_best,
+        )
 
         if args.remote_dir:
             print(f"backing up to remote: {args.remote_dir}")
@@ -234,7 +242,7 @@ def main(args: DictConfig):
     best_ckpt = torch.load(
         output_dir / "checkpoint-best.pth", map_location="cpu", weights_only=True
     )
-    model.load_state_dict(best_ckpt["model"])
+    model.classifiers.load_state_dict(best_ckpt["model"])
     best_info = best_ckpt["meta"]["best_info"]
     print(f"best model info:\n{json.dumps(best_info)}")
 
@@ -583,14 +591,64 @@ def get_best_hparams(model: ClassifierGrid, stats: dict[str, float]):
     return best_id, best_hparam, best_loss
 
 
+def save_model(args, epoch, model, optimizer, meta=None, is_best=None):
+    output_dir = Path(args.output_dir)
+    last_checkpoint_path = output_dir / "checkpoint-last.pth"
+    best_checkpoint_path = output_dir / "checkpoint-best.pth"
+
+    to_save = {
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "args": OmegaConf.to_container(args),
+        "epoch": epoch,
+        "meta": meta,
+        "is_best": is_best,
+    }
+
+    print(f"saving checkpoint {last_checkpoint_path}")
+    torch.save(to_save, last_checkpoint_path)
+    if is_best:
+        print(f"saving best checkpoint {best_checkpoint_path}")
+        torch.save(to_save, best_checkpoint_path)
+
+
+def load_model(args, model, optimizer):
+    ckpt_path = Path(args.output_dir) / "checkpoint-last.pth"
+
+    if ckpt_path.exists():
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+        model.load_state_dict(ckpt["model"])
+        optimizer.load_state_dict(ckpt["optimizer"])
+        args.start_epoch = ckpt["epoch"] + 1
+        meta = ckpt["meta"]
+        print(f"loaded model and optimizer state, resuming training from {args.start_epoch}")
+    else:
+        args.start_epoch = 0
+        meta = None
+
+    return meta
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cfg-path", type=str, default=None)
+    parser.add_argument(
+        "model",
+        type=str,
+        help=f"[{', '.join(list_models())}]",
+    )
+    parser.add_argument(
+        "dataset",
+        type=str,
+        help=f"[{', '.join(list_datasets())}]",
+    )
+    parser.add_argument("--config", type=str, default=None)
     parser.add_argument("--overrides", type=str, default=None, nargs="+")
     args = parser.parse_args()
     cfg = OmegaConf.load(DEFAULT_CONFIG)
-    if args.cfg_path:
-        cfg = OmegaConf.unsafe_merge(cfg, OmegaConf.load(args.cfg_path))
+    if args.config:
+        cfg = OmegaConf.unsafe_merge(cfg, OmegaConf.load(args.config))
     if args.overrides:
         cfg = OmegaConf.unsafe_merge(cfg, OmegaConf.from_dotlist(args.overrides))
+    cfg.model = args.model
+    cfg.dataset = args.dataset
     main(cfg)

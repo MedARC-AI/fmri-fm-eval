@@ -17,8 +17,6 @@ import random
 import subprocess
 import time
 from collections import defaultdict, deque
-from omegaconf import OmegaConf
-from pathlib import Path
 from urllib.parse import urlparse
 
 import numpy as np
@@ -278,60 +276,6 @@ def init_distributed_mode(args):
         device_id=args.gpu,
     )
     torch.distributed.barrier()
-
-
-# checkpoint saving utils adapted from beit3
-
-
-def save_model(
-    args, epoch, model_without_ddp, optimizer, loss_scaler=None, meta=None, is_best=None
-):
-    output_dir = Path(args.output_dir)
-    last_checkpoint_path = output_dir / "checkpoint-last.pth"
-    best_checkpoint_path = output_dir / "checkpoint-best.pth"
-
-    to_save = {
-        "model": model_without_ddp.state_dict(),
-        "optimizer": optimizer.state_dict(),
-        "epoch": epoch,
-        "scaler": None if loss_scaler is None else loss_scaler.state_dict(),
-        "args": OmegaConf.to_container(args),
-        "meta": meta,
-        "is_best": is_best,
-    }
-
-    print(f"saving checkpoint {last_checkpoint_path}")
-    save_on_master(to_save, last_checkpoint_path)
-
-    if is_best:
-        print(f"saving best checkpoint {best_checkpoint_path}")
-        save_on_master(to_save, best_checkpoint_path)
-
-
-def load_model(args, model_without_ddp, optimizer, loss_scaler=None):
-    auto_resume = getattr(args, "auto_resume", True)
-    output_dir = Path(args.output_dir)
-
-    last_checkpoint_path = output_dir / "checkpoint-last.pth"
-    if auto_resume and last_checkpoint_path.exists():
-        args.ckpt = str(last_checkpoint_path)
-        args.resume = True
-
-    meta = None
-    if args.ckpt:
-        ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=True)
-        model_without_ddp.load_state_dict(ckpt["model"])
-        print(f"loaded model state from checkpoint {args.ckpt}")
-
-        if args.resume:
-            optimizer.load_state_dict(ckpt["optimizer"])
-            if loss_scaler is not None:
-                loss_scaler.load_state_dict(ckpt["scaler"])
-            args.start_epoch = ckpt["epoch"] + 1
-            meta = ckpt["meta"]
-            print(f"loaded optimizer state, resuming training from {args.start_epoch}")
-
-    return meta
 
 
 def rsync(src_path: str, dst_path: str):

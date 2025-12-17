@@ -12,9 +12,9 @@ remote_root: null
 # Description of the run. Goes in wandb notes.
 notes: null
 
-# Model
-model: connectome_schaefer400
+# Model and dataset extra kwargs
 model_kwargs: {}
+dataset_kwargs: {}
 
 # Classifier settings
 
@@ -31,10 +31,6 @@ representation: cls
 # Intermediate embed dim for attentive probe
 # defaults to the input embed dim
 attn_pool_embed_dim: null
-
-# Dataset
-dataset: hcpya_rest1lr_gender
-dataset_kwargs: {}
 
 # Grid of learning rate and weight decay scale factors for classifier grid.
 lr_scale_grid: [0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0]
@@ -59,16 +55,6 @@ weight_decay: 0.05
 clip_grad: 1.0
 
 amp: true
-
-# Checkpoint to use for init
-ckpt: null
-# resume training, or restart
-resume: true
-# Restarting a failed run (with the same output directory) will automatically resume
-auto_resume: true
-# The start epoch is taken from the checkpoint when resuming, but in case you need to
-# manually override.
-start_epoch: 0
 
 device: cuda
 
