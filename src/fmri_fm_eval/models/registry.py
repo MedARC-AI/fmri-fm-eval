@@ -41,6 +41,8 @@ def create_model(name: str, **kwargs) -> ModelTransformPair:
 
     if not isinstance(model_pair, tuple):
         transform, model = None, model_pair
+    else:
+        transform, model = model_pair
     return transform, model
 
 
