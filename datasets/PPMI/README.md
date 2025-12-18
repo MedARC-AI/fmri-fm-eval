@@ -1,76 +1,122 @@
 # PPMI 
 
 This folder contains all steps and scripts needed to convert the **PPMI** dataset
-from the original DICOM ZIP files into a **BIDS** structure using `dcm2niix` and `dcm2bids`.
+from the original DICOM ZIP files into a **BIDS** structure using `dcm2bids`.
 
-These instructions assume the PPMI zip files `PPMI_01.zip.*`, `PPMI_02.zip.*`, …
-are already available in a local directory such as:
-
-```
-PPMI/dicom/
-```
-
-## Reconstruct and Extract ZIP Files (PPMI_01, PPMI_02, ...)
-PPMI splits large ZIP archives into multiple chunks: 
+These instructions assume the PPMI zip files (`PPMI_01.zip.*`, `PPMI_02.zip.*`, …) are already available in a local directory such as:
 
 ```
-PPMI_01.zip.aa
-PPMI_01.zip.ab
-PPMI_01.zip.ac
-...
+datasets/PPMI/dicom/
 ```
 
-Reconstruct the full ZIP file
-```bash
-cat PPMI/dicom/PPMI_01.zip.* > PPMI/dicom/PPMI_01.zip
-``` 
 
-Extract the DICOM data
+## Prerequisites
+* Ensure `dcm2niix` and `dcm2bids` are installed.
+* Ensure `bash` is available
+
+
+## Reconstruct and Extract the DICOM data
+Run the `unzip_ppmi.sh` script in the `datasets/PPMI/scripts/` folder:
 
 ```bash
-mkdir -p PPMI/unzipped/PPMI_01
-unzip PPMI/dicom/PPMI_01.zip -d PPMI/unzipped/PPMI_01
+./datasets/PPMI/scripts/unzip_ppmi.sh [base_dir]
 ```
+`[base_dir]` is optional, default: `datasets/PPMI`.
 
-After extraction, the directory will look like:
+After extraction, the directory structure will look like:
 ``` 
-PPMI/unzipped/PPMI_01/PPMI/<subject_id>/...
+/datasets/PPMI/unzipped/PPMI/<subject_id>/...
 ```
+`<subject_id>` folders come from the zip contents.
+
 
 ## DICOM to BIDS Conversion
-Ensure `dcm2niix` and `dcm2bids` are installed.
 
-Create BIDS directory structure
+### Create the BIDS directory structure
 ```bash
-mkdir -p PPMI/bids
+mkdir -p datasets/PPMI/bids
 ```
 
-Create template BIDS metadata files
+### Generate BIDS metadata files
 ```bash
-dcm2bids_scaffold -o PPMI/bids
+dcm2bids_scaffold -o datasets/PPMI/bids
 ```
 
-Copy configuration file 
+### Copy the configuration file 
+The conversion requires a configuration file, provided at: 
 
-The conversion requires the configuration file, which is provided at `PPMI/scripts/dcm2bids_config.json`. **Copy this file** into the BIDS metadata location: 
+`datasets/PPMI/scripts/dcm2bids_config.json`. 
+
+Copy it into the BIDS `code` folder: 
 ```bash 
-cp PPMI/scripts/dcm2bids_config.json PPMI/bids/code/dcm2bids_config.json
+cp datasets/PPMI/scripts/dcm2bids_config.json datasets/PPMI/bids/code/dcm2bids_config.json
 ```
 
-Run the conversion
-``` bash
-bash PPMI/scripts/run_dcm2bids.sh
+### Run the conversion script
+```bash
+./datasets/PPMI/scripts/run_dcm2bids.sh [base_dir] [bids_dir] [config_file]
 ```
 
-Expected output structure
+* All arguments are optional. 
+* Defaults:
+* base_dir: `./datasets/PPMI/unzipped/PPMI`
+* bids_dir: `./datasets/PPMI/bids`
+* config_file: `./datasets/PPMI/bids/code/dcm2bids_config.json`
+
+### Expected output and logging
+After conversion, the BIDS dataset will look like:
 
 ```
-PPMI/bids/sub-<ID>/
+datasets/PPMI/bids/sub-<ID>/ses-<ID>/
 ```
 with:
-* ```anat/sub-<ID>_T1w.nii.gz```
-* ```func/sub-<ID>_task-rest_dir-<phase>_bold.nii.gz```
+* ```anat/sub-<ID>_ses-<ID>_T1w.nii.gz```
+* ```func/sub-<ID>_ses-<ID>_task-rest_dir-<phase>_bold.nii.gz```
 
-## Notes
-* Some subjects may be skipped if their fMRI runs are extremely short or malformed.
-* The resulting BIDS folder is ready for preprocessing with `fMRIPrep`.
+The script creates a log file at:
+```
+datasets/PPMI/bids/dcm2bids_conversion.log
+```
+
+
+## Generate Filtered Subject List
+Run the subject list notebook to generate a filtered list of valid subjects:
+
+```bash
+datasets/PPMI/notebooks/ppmi_bids_subject_list.ipynb
+```
+
+* This notebook selects subjects based on the defined criteria (e.g., at least 1 T1w and 1 fMRI BOLD scan with >=200 TRs)
+* Output CSV: `datasets/PPMI/metadata/PPMI_T1+fMRI_gt200TR_valid_subjects.csv` 
+* This file will be used as input for the next curation step.
+
+
+## Curate Complete PPMI Dataset
+Run the curation script:
+
+```bash
+python datasets/PPMI/scripts/curate_ppmi.py
+```
+
+* Reads the filtered subject list and all clinical metadata.
+* Applies the hybrid filtering criteria:
+    * Strict filtering for PD/Prodromal patients (all required clinical columns present)
+    * Lenient filtering for Healthy Controls (impute missing clinical scores)
+* Output CSV: `datasets/PPMI/metadata/PPMI_Hybrid_Cases.csv`
+
+
+## Create 500-Subject Subset
+Run the 500-subject subset script:
+
+```bash
+python datasets/PPMI/scripts/subset_500.py
+```
+
+* Stratified selection maintaining diagnosis proportions: Healthy Control, Parkinson's Disease, and Prodromal.
+* Splits data into train/test/validation (70/15/15%)
+* Outputs:
+
+```bash
+datasets/PPMI/metadata/PPMI_500_Curated.csv (session-level)
+datasets/PPMI/metadata/PPMI_500_Split_Reference.csv (subject-level)
+```
