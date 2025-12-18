@@ -24,6 +24,9 @@ _version.py
 # scratch
 .scratch
 
+# outputs
+output
+
 # freesurfer
 license.txt
 fsaverage

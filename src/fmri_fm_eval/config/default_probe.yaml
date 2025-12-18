@@ -1,0 +1,66 @@
+# Root output directory
+# Individual eval runs will be saved as:
+#
+#   output_root/{name_prefix}/{model}/{representation}/{dataset}
+output_root: output
+name_prefix: probe_eval
+
+# Remote root for backing up results
+# currently only S3 supported
+remote_root: null
+
+# Description of the run. Goes in wandb notes.
+notes: null
+
+# Model and dataset extra kwargs
+model_kwargs: {}
+dataset_kwargs: {}
+
+# Classifier settings
+
+# Input pooled embedding
+#   - cls
+#   - avg_patch
+#   - cls_avg_patch
+#   - avg_reg
+#   - concat_reg
+#   - reg
+#   - patch
+representation: cls
+
+# Intermediate embed dim for attentive probe
+# defaults to the input embed dim
+attn_pool_embed_dim: null
+
+# Grid of learning rate and weight decay scale factors for classifier grid.
+lr_scale_grid: [0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0]
+wd_scale_grid: [0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0]
+
+# Data loader
+num_workers: 8
+
+# Optimization
+epochs: 20
+steps_per_epoch: 500
+# total_batch_size = batch_size * accum_iter
+batch_size: 32
+accum_iter: 1
+
+# absolute_lr = base_lr * total_batch_size / 256
+base_lr: 1e-3
+# lower lr bound for cyclic schedulers that hit 0
+min_lr: 0.0
+warmup_epochs: 2
+weight_decay: 0.05
+clip_grad: 1.0
+
+amp: true
+
+device: cuda
+
+seed: 4466
+debug: false
+
+wandb: true
+wandb_entity: null
+wandb_project: fMRI-fm-eval

@@ -9,6 +9,7 @@ Misc neuroimaging utils.
 - basic data preprocessing
 """
 
+import logging
 import math
 import urllib.request
 from pathlib import Path
@@ -24,6 +25,12 @@ from nibabel.cifti2 import BrainModelAxis, Cifti2Image
 from scipy.sparse import coo_array
 from scipy.spatial import Delaunay
 from sklearn.neighbors import NearestNeighbors
+
+# quiet nibabel warning
+# pixdim[1,2,3] should be non-zero; setting 0 dims to 1
+logging.getLogger("nibabel").setLevel(logging.ERROR)
+
+FSLR64K_NUM_VERTICES = 64984
 
 
 # NIFTI/CIFTI related utils
@@ -222,8 +229,8 @@ class ParcelAverage:
         self.eps = eps
 
         self.mask = parc > 0
-        self.parc = parc[self.mask]
-        self.parc_one_hot = parc_to_one_hot(self.parc, sparse=sparse)
+        self.parc = parc
+        self.parc_one_hot = parc_to_one_hot(self.parc[self.mask], sparse=sparse)
 
     def transform(self, series: np.ndarray) -> np.ndarray:
         series = series[:, self.mask]
@@ -295,6 +302,11 @@ def maybe_download_subject(subject: str):
     id_to_url = {
         "32k_fs_LR": "https://figshare.com/ndownloader/files/58130806",
     }
+
+    # filestore isn't created automatically
+    # https://github.com/gallantlab/pycortex/issues/447
+    Path(cortex.database.default_filestore).mkdir(exist_ok=True, parents=True)
+
     if subject not in cortex.db.subjects:
         cortex.download_subject(subject, url=id_to_url.get(subject))
 
