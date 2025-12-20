@@ -81,58 +81,53 @@ class BrainJEPATransform:
     """
     Transform for Brain-JEPA model.
 
-    Preprocessing steps (copied from original Brain-JEPA codebase):
-    1. Temporal clip selection: center crop of `sampling_rate * num_frames` frames
-    2. Temporal sampling: linearly sample to `num_frames` frames
-    3. Reshape: (T, D) -> (1, D, T) for Brain-JEPA's Conv2d patch embedding
-    4. Optional global normalization
-
-    Input sample format (from fmri-fm-eval):
-        - bold: (T, 450) - BOLD time series, normalized per-voxel to mean=0, std=1
-        - mean: (1, 450) - original voxel means (unused)
-        - std: (1, 450) - original voxel stds (unused)
-        - tr: float - repetition time (unused)
-
-    Output sample format:
-        - bold: (1, 450, num_frames) - ready for Brain-JEPA encoder
-
-    Reference: Brain-JEPA/src/datasets/hca_sex_datasets.py
+    Preprocessing steps:
+    1. Unnormalize BOLD data using mean and std
+    2. Resample to target TR if input TR differs from target
+    3. Temporal sampling: center crop and linearly sample to `num_frames` frames
+    4. Reshape: (T, D) -> (1, D, T) for Brain-JEPA's Conv2d patch embedding
+    5. Optional global normalization
     """
 
     def __init__(
         self,
         num_frames: int = 160,
-        sampling_rate: int = 3,
+        target_tr: float = 2.0,
         use_normalization: bool = False,
     ):
         """
         Args:
             num_frames: Number of output frames after temporal sampling. Default 160.
-            sampling_rate: Ratio for clip size calculation (clip_size = sampling_rate * num_frames).
-                Default 3, giving clip_size = 480 frames.
+            target_tr: Target repetition time in seconds. Default 2.0.
             use_normalization: Apply global mean/std normalization. Default False.
         """
         self.num_frames = num_frames
-        self.sampling_rate = sampling_rate
+        self.target_tr = target_tr
         self.use_normalization = use_normalization
 
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]:
         bold = sample["bold"]  # (T, D) - normalized per-ROI
         mean = sample["mean"]  # (1, D) - original means
         std = sample["std"]    # (1, D) - original stds
+        tr = sample["tr"]      # float - repetition time
         
         # Unnormalize BOLD data
         bold = bold * std + mean
         
         T, D = bold.shape
 
+        # Resample to target TR if needed
+        if tr != self.target_tr:
+            bold = self._resample_to_target_tr(bold, tr, self.target_tr)
+
         # Transpose to (D, T) to match Brain-JEPA's internal format
         bold = bold.T  # (D, T)
+        T = bold.shape[1]  # Update T after resampling
 
-        # Apply temporal resampling if needed
+        # Apply temporal sampling to num_frames if needed
         if T != self.num_frames:
-            clip_size = self.sampling_rate * self.num_frames
-            start_idx, end_idx = self._get_start_end_idx(T, clip_size)
+            # Center crop: use all available frames, then sample to num_frames
+            start_idx, end_idx = self._get_start_end_idx(T, T)
             bold = self._temporal_sampling(bold, start_idx, end_idx, self.num_frames)
 
         # Add channel dimension: (D, T) -> (1, D, T)
@@ -147,6 +142,33 @@ class BrainJEPATransform:
         # Update sample in place
         sample["bold"] = bold.to(torch.float32)
         return sample
+
+    def _resample_to_target_tr(self, bold: Tensor, tr: float, target_tr: float) -> Tensor:
+        """
+        Resample time series to target TR using linear interpolation.
+        """
+        if tr == target_tr:
+            return bold
+        
+        T, D = bold.shape
+        
+        # Calculate new length
+        duration = tr * T
+        new_length = int(duration / target_tr)
+        
+        # Transpose to (D, T) for interpolation, then add batch and channel dims: (1, D, T)
+        bold_t = bold.T.unsqueeze(0)  # (1, D, T)
+        
+        # Use 1D interpolation (works on last dimension)
+        bold_resampled = torch.nn.functional.interpolate(
+            bold_t,
+            size=new_length,
+            mode='linear',
+            align_corners=False,
+        )  # (1, D, T_new)
+        
+        # Transpose back to (T_new, D)
+        return bold_resampled.squeeze(0).T
 
     def _get_start_end_idx(self, fmri_size: int, clip_size: int) -> tuple[float, float]:
         """
@@ -411,9 +433,9 @@ def brain_jepa(
     # Create wrapper
     model = BrainJEPAModelWrapper(encoder, gradient_pos_embed)
 
-    # Create transform
     transform = BrainJEPATransform(
         num_frames=crop_size[1],
+        target_tr=2.0,
         use_normalization=use_normalization,
     )
 
