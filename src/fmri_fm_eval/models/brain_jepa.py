@@ -21,7 +21,6 @@ Reference: Brain-JEPA/src/datasets/hca_sex_datasets.py
 """
 
 from pathlib import Path
-from typing import Literal
 
 import pandas as pd
 import torch
@@ -228,45 +227,46 @@ def load_gradient_embeddings(
     return gradient.unsqueeze(0).to(device)  # (1, 450, 30)
 
 
-def resolve_checkpoint_path(
-    ckpt_path: str | Path | None,
-    model_name: str = "vit_base",
-    auto_load: bool = True,
-) -> Path | None:
+def resolve_checkpoint_path(ckpt_path: str | Path | None) -> Path:
     """
     Resolve checkpoint path from various sources.
 
     Checks in order:
     1. If ckpt_path is provided and exists, use it
-    2. If ckpt_path is None and auto_load is True and model_name is 'vit_base',
-       try default GCS path (the pretrained checkpoint is vit_base only)
-    3. Return None if no checkpoint found (random init)
+    2. If ckpt_path is None, try default GCS path
+    3. Raise FileNotFoundError if no checkpoint found
 
     Args:
         ckpt_path: User-provided checkpoint path, or None for auto-detection
-        model_name: Model variant name (only 'vit_base' has pretrained checkpoint)
-        auto_load: Whether to auto-load default checkpoint when ckpt_path is None
 
     Returns:
-        Resolved Path to checkpoint, or None if not found
+        Resolved Path to checkpoint
+
+    Raises:
+        FileNotFoundError: If checkpoint cannot be found
     """
     if ckpt_path is not None:
         ckpt_path = Path(ckpt_path)
         if ckpt_path.exists():
             return ckpt_path
-        raise FileNotFoundError(f"Checkpoint not found at {ckpt_path}")
+        raise FileNotFoundError(
+            f"Checkpoint not found at {ckpt_path}. "
+            "Please provide a valid checkpoint path or ensure the default checkpoint is available."
+        )
 
-    # Only auto-load for vit_base (the pretrained checkpoint architecture)
-    if auto_load and model_name == "vit_base" and DEFAULT_CKPT_PATH.exists():
+    # Try default GCS path
+    if DEFAULT_CKPT_PATH.exists():
         return DEFAULT_CKPT_PATH
-
-    return None
+    raise FileNotFoundError(
+        f"Default checkpoint not found at {DEFAULT_CKPT_PATH}. "
+        f"Please provide a checkpoint path explicitly: "
+        f"create_model('brain_jepa', ckpt_path='/path/to/jepa-ep300.pth.tar')"
+    )
 
 
 def build_brain_jepa_encoder(
     crop_size: tuple[int, int] = (450, 160),
     patch_size: int = 16,
-    model_name: str = "vit_base",
     gradient_pos_embed: Tensor | None = None,
     attn_mode: str = "normal",
     add_w: str = "mapping",
@@ -274,14 +274,13 @@ def build_brain_jepa_encoder(
     device: torch.device | str = "cpu",
 ):
     """
-    Build Brain-JEPA encoder model.
+    Build Brain-JEPA encoder model using ViT-Base architecture.
 
     This imports from the Brain-JEPA source code and initializes the encoder.
 
     Args:
         crop_size: (num_rois, num_frames) input size. Default (450, 160).
         patch_size: Temporal patch size. Default 16.
-        model_name: Model variant ('vit_small', 'vit_base', 'vit_large').
         gradient_pos_embed: Preloaded gradient embeddings tensor.
         attn_mode: Attention mode ('normal', 'flash_attn').
         add_w: Positional embedding mode ('origin', 'mapping').
@@ -301,10 +300,10 @@ def build_brain_jepa_encoder(
 
     import src.models.vision_transformer as vit
 
-    # Build encoder
-    encoder = vit.__dict__[model_name](
-        img_size=(crop_size[0], crop_size[1]),
+    # Build encoder (always use vit_base)
+    encoder = vit.vit_base(
         patch_size=patch_size,
+        img_size=(crop_size[0], crop_size[1]),
         in_chans=1,
         gradient_pos_embed=gradient_pos_embed,
         attn_mode=attn_mode,
@@ -371,7 +370,6 @@ def brain_jepa(
     gradient_csv_path: str | Path = DEFAULT_GRADIENT_CSV,
     crop_size: tuple[int, int] = (450, 160),
     patch_size: int = 16,
-    model_name: Literal["vit_small", "vit_base", "vit_large"] = "vit_base",
     attn_mode: str = "normal",  # 'normal' for broader compatibility, 'flash_attn' for speed
     add_w: str = "mapping",  # Must match pretrained checkpoint (ukb_vitb_ep300.yaml)
     gradient_checkpointing: bool = False,
@@ -382,13 +380,15 @@ def brain_jepa(
     """
     Create Brain-JEPA model and transform for evaluation.
 
+    Uses ViT-Base architecture (768 dim, 12 layers, 4500 patches) which matches
+    the pretrained checkpoint.
+
     Args:
         ckpt_path: Path to pretrained checkpoint file (.pth.tar).
-            If None, tries default GCS path, then falls back to random init.
+            If None, tries default GCS path, raises error if not found.
         gradient_csv_path: Path to gradient_mapping_450.csv file.
         crop_size: (num_rois, num_frames) input size. Default (450, 160).
         patch_size: Temporal patch size. Default 16.
-        model_name: Model variant ('vit_small', 'vit_base', 'vit_large').
         attn_mode: Attention mode ('normal', 'flash_attn').
         add_w: Positional embedding mode ('origin', 'mapping').
             Default 'mapping' to match pretrained checkpoint.
@@ -409,11 +409,10 @@ def brain_jepa(
     # Load gradient positional embeddings
     gradient_pos_embed = load_gradient_embeddings(gradient_csv_path, device=device)
 
-    # Build encoder
+    # Build encoder (always uses vit_base)
     encoder = build_brain_jepa_encoder(
         crop_size=crop_size,
         patch_size=patch_size,
-        model_name=model_name,
         gradient_pos_embed=gradient_pos_embed,
         attn_mode=attn_mode,
         add_w=add_w,
@@ -421,15 +420,10 @@ def brain_jepa(
         device=device,
     )
 
-    # Resolve and load checkpoint (only auto-loads for vit_base)
-    resolved_ckpt = resolve_checkpoint_path(ckpt_path, model_name=model_name)
-    if resolved_ckpt is not None:
-        print(f"Loading Brain-JEPA checkpoint from: {resolved_ckpt}")
-        encoder = load_brain_jepa_checkpoint(encoder, resolved_ckpt, device=device)
-    elif ckpt_path is None:
-        print(f"No checkpoint found for {model_name}, using randomly initialized weights")
-    else:
-        print("No checkpoint found, using randomly initialized weights")
+    # Resolve and load checkpoint (raises error if not found)
+    resolved_ckpt = resolve_checkpoint_path(ckpt_path)
+    print(f"Loading Brain-JEPA checkpoint from: {resolved_ckpt}")
+    encoder = load_brain_jepa_checkpoint(encoder, resolved_ckpt, device=device)
 
     # Freeze encoder weights for evaluation
     encoder.requires_grad_(False)
@@ -447,22 +441,3 @@ def brain_jepa(
     )
 
     return transform, model
-
-
-# Convenience aliases for specific model variants
-@register_model
-def brain_jepa_vit_base(**kwargs) -> tuple[BrainJEPATransform, BrainJEPAModelWrapper]:
-    """Brain-JEPA with ViT-Base encoder (768 dim, 12 layers, 4500 patches)."""
-    return brain_jepa(model_name="vit_base", **kwargs)
-
-
-@register_model
-def brain_jepa_vit_small(**kwargs) -> tuple[BrainJEPATransform, BrainJEPAModelWrapper]:
-    """Brain-JEPA with ViT-Small encoder (384 dim, 12 layers, 4500 patches)."""
-    return brain_jepa(model_name="vit_small", **kwargs)
-
-
-@register_model
-def brain_jepa_vit_large(**kwargs) -> tuple[BrainJEPATransform, BrainJEPAModelWrapper]:
-    """Brain-JEPA with ViT-Large encoder (1024 dim, 24 layers, 4500 patches)."""
-    return brain_jepa(model_name="vit_large", **kwargs)
