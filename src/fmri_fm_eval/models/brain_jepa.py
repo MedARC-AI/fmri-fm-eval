@@ -64,6 +64,7 @@ def fetch_brain_jepa_checkpoint() -> Path:
             "Install with: pip install gdown"
         )
 
+    # File ID from Brain-JEPA README.md (gdown 1LL3gM-i5SLDWCFyvj71M3peLeU6V2qMR)
     file_id = "1LL3gM-i5SLDWCFyvj71M3peLeU6V2qMR"
     cache_dir = BRAIN_JEPA_CACHE_DIR
     cache_dir.mkdir(parents=True, exist_ok=True)
