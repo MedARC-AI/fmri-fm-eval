@@ -228,10 +228,6 @@ class BrainJEPAModelWrapper(nn.Module):
     def forward(self, batch: dict[str, Tensor]) -> Embeddings:
         x = batch["bold"]  # (B, 1, D, T)
 
-        # Move input to same device as model
-        device = self.gradient_pos_embed.device
-        x = x.to(device)
-
         # Forward through encoder to get patch tokens
         patch_tokens = self.encoder(x, masks=None, return_attention=False)
         # patch_tokens: (B, num_patches, embed_dim)
@@ -246,7 +242,6 @@ class BrainJEPAModelWrapper(nn.Module):
 
 def load_gradient_embeddings(
     gradient_csv_path: str | Path | None = None,
-    device: torch.device | str = "cpu",
 ) -> Tensor:
     """Load gradient embeddings from CSV. Auto-downloads if path is None."""
     if gradient_csv_path is None:
@@ -259,7 +254,7 @@ def load_gradient_embeddings(
         )
     df = pd.read_csv(gradient_csv_path, header=None)
     gradient = torch.tensor(df.values, dtype=torch.float32)
-    return gradient.unsqueeze(0).to(device)  # (1, 450, 30)
+    return gradient.unsqueeze(0)  # (1, 450, 30)
 
 
 def resolve_checkpoint_path(ckpt_path: str | Path | None) -> Path:
@@ -298,7 +293,6 @@ def build_brain_jepa_encoder(
         add_w: Positional embedding mode ('origin', 'mapping').
             'mapping' is used by pretrained checkpoint.
         gradient_checkpointing: Enable gradient checkpointing for memory efficiency.
-        device: Device to load model on.
 
     Returns:
         Initialized encoder model.
@@ -331,14 +325,12 @@ def build_brain_jepa_encoder(
         add_w=add_w,
         gradient_checkpointing=gradient_checkpointing,
     )
-    encoder.to(device)
     return encoder
 
 
 def load_brain_jepa_checkpoint(
     encoder: nn.Module,
     ckpt_path: str | Path,
-    device: torch.device | str = "cpu",
 ) -> nn.Module:
     """
     Load Brain-JEPA pretrained checkpoint into encoder.
@@ -349,7 +341,6 @@ def load_brain_jepa_checkpoint(
     Args:
         encoder: Initialized encoder model to load weights into.
         ckpt_path: Path to checkpoint file (.pth.tar).
-        device: Device for loading.
 
     Returns:
         Encoder with loaded weights.
@@ -358,7 +349,7 @@ def load_brain_jepa_checkpoint(
     if not ckpt_path.exists():
         raise FileNotFoundError(f"Checkpoint not found at {ckpt_path}")
 
-    checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
+    checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
 
     # Brain-JEPA stores EMA encoder as 'target_encoder'
     if "target_encoder" in checkpoint:
@@ -389,20 +380,18 @@ def load_brain_jepa_checkpoint(
 def brain_jepa(
     ckpt_path: str | Path | None = None,
     gradient_csv_path: str | Path | None = None,
-    crop_size: tuple[int, int] = (450, 160),
-    patch_size: int = 16,
-    attn_mode: str = "normal",  # 'normal' for broader compatibility, 'flash_attn' for speed
-    add_w: str = "mapping",  # Must match pretrained checkpoint (ukb_vitb_ep300.yaml)
-    gradient_checkpointing: bool = False,
-    use_normalization: bool = False,
-    device: str = "cpu",  # Default to CPU for test compatibility
-    **kwargs,
 ) -> tuple[BrainJEPATransform, BrainJEPAModelWrapper]:
     """Create Brain-JEPA model and transform. Auto-downloads files if paths are None."""
-    device = torch.device(device)
+    # Match the pretrained checkpoint
+    crop_size = (450, 160)
+    patch_size = 16
+    attn_mode = "normal"
+    add_w = "mapping"  # match pretrained checkpoint (ukb_vitb_ep300.yaml)
+    gradient_checkpointing = False
+    use_normalization = False
 
     # Load gradient positional embeddings
-    gradient_pos_embed = load_gradient_embeddings(gradient_csv_path, device=device)
+    gradient_pos_embed = load_gradient_embeddings(gradient_csv_path)
 
     # Build encoder (always uses vit_base)
     encoder = build_brain_jepa_encoder(
@@ -412,22 +401,15 @@ def brain_jepa(
         attn_mode=attn_mode,
         add_w=add_w,
         gradient_checkpointing=gradient_checkpointing,
-        device=device,
     )
 
     # Resolve and load checkpoint (raises error if not found)
     resolved_ckpt = resolve_checkpoint_path(ckpt_path)
     print(f"Loading Brain-JEPA checkpoint from: {resolved_ckpt}")
-    encoder = load_brain_jepa_checkpoint(encoder, resolved_ckpt, device=device)
-
-    # Freeze encoder weights for evaluation
-    encoder.requires_grad_(False)
-    encoder.eval()
+    encoder = load_brain_jepa_checkpoint(encoder, resolved_ckpt)
 
     # Create wrapper
     model = BrainJEPAModelWrapper(encoder, gradient_pos_embed)
-    model.to(device)
-    model.eval()
 
     # Create transform
     transform = BrainJEPATransform(
