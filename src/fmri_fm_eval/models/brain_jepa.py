@@ -20,6 +20,7 @@ Preprocessing Pipeline (matches original Brain-JEPA):
 Reference: Brain-JEPA/src/datasets/hca_sex_datasets.py
 """
 
+import urllib.request
 from pathlib import Path
 
 import pandas as pd
@@ -31,12 +32,48 @@ from fmri_fm_eval.models.base import Embeddings
 from fmri_fm_eval.models.registry import register_model
 
 
-# Default paths
-BRAIN_JEPA_ROOT = Path(__file__).parents[4] / "Brain-JEPA"
-DEFAULT_GRADIENT_CSV = BRAIN_JEPA_ROOT / "data" / "gradient_mapping_450.csv"
+# Cache directory for downloaded files
+BRAIN_JEPA_CACHE_DIR = Path.home() / ".cache" / "fmri-fm-eval" / "brain-jepa"
 
-# Default checkpoint paths (GCS mounted path on Lightning AI)
-DEFAULT_CKPT_PATH = Path("/teamspace/gcs_folders/share/fmri-fm/brain-jepa/jepa-ep300.pth.tar")
+
+def fetch_gradient_mapping() -> Path:
+    """Download gradient_mapping_450.csv from GitHub with caching."""
+    base_url = "https://github.com/Eric-LRL/Brain-JEPA/raw/main/data"
+    filename = "gradient_mapping_450.csv"
+    cache_dir = BRAIN_JEPA_CACHE_DIR
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cached_file = cache_dir / filename
+
+    if not cached_file.exists():
+        url = f"{base_url}/{filename}"
+        try:
+            urllib.request.urlretrieve(url, cached_file)
+        except Exception as exc:
+            raise ValueError(f"Download failed: {url}") from exc
+
+    return cached_file
+
+
+def fetch_brain_jepa_checkpoint() -> Path:
+    """Download jepa-ep300.pth.tar from Google Drive with caching."""
+    try:
+        import gdown
+    except ImportError:
+        raise ImportError(
+            "gdown is required for downloading Brain-JEPA checkpoint. "
+            "Install with: pip install gdown"
+        )
+
+    file_id = "1LL3gM-i5SLDWCFyvj71M3peLeU6V2qMR"
+    cache_dir = BRAIN_JEPA_CACHE_DIR
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cached_file = cache_dir / "jepa-ep300.pth.tar"
+
+    if not cached_file.exists():
+        url = f"https://drive.google.com/uc?id={file_id}"
+        gdown.download(url, str(cached_file), quiet=False)
+
+    return cached_file
 
 
 class BrainJEPATransform:
@@ -199,23 +236,12 @@ class BrainJEPAModelWrapper(nn.Module):
 
 
 def load_gradient_embeddings(
-    gradient_csv_path: str | Path = DEFAULT_GRADIENT_CSV,
+    gradient_csv_path: str | Path | None = None,
     device: torch.device | str = "cpu",
 ) -> Tensor:
-    """
-    Load brain gradient positional embeddings from CSV file.
-
-    Brain gradients are derived from population-level functional connectivity
-    using the Brainspace toolbox. They provide a continuous coordinate system
-    for the 450 ROIs.
-
-    Args:
-        gradient_csv_path: Path to gradient_mapping_450.csv (450 ROIs x 30 gradient dims)
-        device: Device to load tensor on
-
-    Returns:
-        Tensor of shape (1, 450, 30) - gradient embeddings for positional encoding
-    """
+    """Load gradient embeddings from CSV. Auto-downloads if path is None."""
+    if gradient_csv_path is None:
+        gradient_csv_path = fetch_gradient_mapping()
     gradient_csv_path = Path(gradient_csv_path)
     if not gradient_csv_path.exists():
         raise FileNotFoundError(
@@ -228,23 +254,7 @@ def load_gradient_embeddings(
 
 
 def resolve_checkpoint_path(ckpt_path: str | Path | None) -> Path:
-    """
-    Resolve checkpoint path from various sources.
-
-    Checks in order:
-    1. If ckpt_path is provided and exists, use it
-    2. If ckpt_path is None, try default GCS path
-    3. Raise FileNotFoundError if no checkpoint found
-
-    Args:
-        ckpt_path: User-provided checkpoint path, or None for auto-detection
-
-    Returns:
-        Resolved Path to checkpoint
-
-    Raises:
-        FileNotFoundError: If checkpoint cannot be found
-    """
+    """Resolve checkpoint path. Auto-downloads from Google Drive if None."""
     if ckpt_path is not None:
         ckpt_path = Path(ckpt_path)
         if ckpt_path.exists():
@@ -254,14 +264,7 @@ def resolve_checkpoint_path(ckpt_path: str | Path | None) -> Path:
             "Please provide a valid checkpoint path or ensure the default checkpoint is available."
         )
 
-    # Try default GCS path
-    if DEFAULT_CKPT_PATH.exists():
-        return DEFAULT_CKPT_PATH
-    raise FileNotFoundError(
-        f"Default checkpoint not found at {DEFAULT_CKPT_PATH}. "
-        f"Please provide a checkpoint path explicitly: "
-        f"create_model('brain_jepa', ckpt_path='/path/to/jepa-ep300.pth.tar')"
-    )
+    return fetch_brain_jepa_checkpoint()
 
 
 def build_brain_jepa_encoder(
@@ -294,7 +297,16 @@ def build_brain_jepa_encoder(
     # Import Brain-JEPA's vision transformer
     import sys
 
-    brain_jepa_src = str(BRAIN_JEPA_ROOT)
+    brain_jepa_src = BRAIN_JEPA_CACHE_DIR.parent / "Brain-JEPA"
+    if not (brain_jepa_src.exists() and (brain_jepa_src / "src" / "models" / "vision_transformer.py").exists()):
+        raise FileNotFoundError(
+            f"Brain-JEPA repository not found at {brain_jepa_src}. "
+            "Please clone the repository: "
+            "git clone https://github.com/Eric-LRL/Brain-JEPA.git"
+        )
+    
+    brain_jepa_src = str(brain_jepa_src)
+
     if brain_jepa_src not in sys.path:
         sys.path.insert(0, brain_jepa_src)
 
@@ -367,7 +379,7 @@ def load_brain_jepa_checkpoint(
 @register_model
 def brain_jepa(
     ckpt_path: str | Path | None = None,
-    gradient_csv_path: str | Path = DEFAULT_GRADIENT_CSV,
+    gradient_csv_path: str | Path | None = None,
     crop_size: tuple[int, int] = (450, 160),
     patch_size: int = 16,
     attn_mode: str = "normal",  # 'normal' for broader compatibility, 'flash_attn' for speed
@@ -377,33 +389,7 @@ def brain_jepa(
     device: str = "cpu",  # Default to CPU for test compatibility
     **kwargs,
 ) -> tuple[BrainJEPATransform, BrainJEPAModelWrapper]:
-    """
-    Create Brain-JEPA model and transform for evaluation.
-
-    Uses ViT-Base architecture (768 dim, 12 layers, 4500 patches) which matches
-    the pretrained checkpoint.
-
-    Args:
-        ckpt_path: Path to pretrained checkpoint file (.pth.tar).
-            If None, tries default GCS path, raises error if not found.
-        gradient_csv_path: Path to gradient_mapping_450.csv file.
-        crop_size: (num_rois, num_frames) input size. Default (450, 160).
-        patch_size: Temporal patch size. Default 16.
-        attn_mode: Attention mode ('normal', 'flash_attn').
-        add_w: Positional embedding mode ('origin', 'mapping').
-            Default 'mapping' to match pretrained checkpoint.
-        gradient_checkpointing: Enable gradient checkpointing for memory efficiency.
-        use_normalization: Apply global normalization in transform. Default False.
-        device: Device to load model on.
-
-    Returns:
-        (transform, model) tuple for use with fmri-fm-eval.
-
-    Example:
-        >>> from fmri_fm_eval.models.registry import create_model
-        >>> transform, model = create_model("brain_jepa")  # Auto-loads checkpoint
-        >>> transform, model = create_model("brain_jepa", ckpt_path="/path/to/ckpt.pth.tar")
-    """
+    """Create Brain-JEPA model and transform. Auto-downloads files if paths are None."""
     device = torch.device(device)
 
     # Load gradient positional embeddings
