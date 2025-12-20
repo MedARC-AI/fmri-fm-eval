@@ -12,6 +12,7 @@ dependencies = [
     "cloudpathlib[s3]",
     "datasets",
     "einops",
+    "gdown",
     "huggingface_hub",
     "ipython",
     "jupyter",
