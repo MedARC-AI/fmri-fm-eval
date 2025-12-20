@@ -117,7 +117,13 @@ class BrainJEPATransform:
         self.use_normalization = use_normalization
 
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]:
-        bold = sample["bold"]  # (T, D)
+        bold = sample["bold"]  # (T, D) - normalized per-ROI
+        mean = sample["mean"]  # (1, D) - original means
+        std = sample["std"]    # (1, D) - original stds
+        
+        # Unnormalize BOLD data
+        bold = bold * std + mean
+        
         T, D = bold.shape
 
         # Transpose to (D, T) to match Brain-JEPA's internal format
@@ -138,7 +144,9 @@ class BrainJEPATransform:
             std = bold.std()
             bold = (bold - mean) / (std + 1e-6)
 
-        return {"bold": bold.to(torch.float32)}
+        # Update sample in place
+        sample["bold"] = bold.to(torch.float32)
+        return sample
 
     def _get_start_end_idx(self, fmri_size: int, clip_size: int) -> tuple[float, float]:
         """
