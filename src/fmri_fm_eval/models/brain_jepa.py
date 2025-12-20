@@ -120,9 +120,19 @@ class BrainJEPATransform:
         if tr != self.target_tr:
             bold = self._resample_to_target_tr(bold, tr, self.target_tr)
 
+        T, D = bold.shape
+
+        # Pad with ROI mean if too short at the end of the time series
+        if T < self.num_frames:
+            roi_mean = bold.mean(dim=0)  # (D,)
+            pad_size = self.num_frames - T
+            padding = roi_mean.unsqueeze(0).repeat(pad_size, 1)  # (pad_size, D)
+            bold = torch.cat([bold, padding], dim=0)  # (num_frames, D)
+            T = bold.shape[0]
+
         # Transpose to (D, T) to match Brain-JEPA's internal format
         bold = bold.T  # (D, T)
-        T = bold.shape[1]  # Update T after resampling
+        T = bold.shape[1]  # Update T after transpose
 
         # Apply temporal sampling to num_frames if needed
         if T != self.num_frames:
