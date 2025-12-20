@@ -1,23 +1,5 @@
 """
-Brain-JEPA model wrapper for fmri-fm-eval.
-
-Brain-JEPA: Brain Dynamics Foundation Model with Gradient Positioning and Spatiotemporal Masking
-Paper: https://arxiv.org/abs/2409.19407
-Code: https://github.com/Eric-LRL/Brain-JEPA
-
-This wrapper interfaces Brain-JEPA with the fmri-fm-eval evaluation suite.
-
-Preprocessing Pipeline (matches original Brain-JEPA):
-    1. Input: BOLD time series (T, 450) from schaefer400_tians3 parcellation
-       - 400 cortical ROIs (Schaefer atlas)
-       - 50 subcortical ROIs (Tian Scale III atlas)
-    2. Center crop: Select middle clip of `sampling_rate * num_frames` frames
-       (default: 3 * 160 = 480 frames, or T if shorter)
-    3. Temporal sampling: Linearly sample to num_frames (default: 160)
-    4. Reshape: (num_frames, 450) -> (1, 450, num_frames) for Conv2d patch embedding
-    5. Optional: Global mean/std normalization (disabled by default)
-
-Reference: Brain-JEPA/src/datasets/hca_sex_datasets.py
+Brain-JEPA model wrapper
 """
 
 import urllib.request
@@ -366,16 +348,7 @@ def load_brain_jepa_checkpoint(
 ) -> nn.Module:
     """
     Load Brain-JEPA pretrained checkpoint into encoder.
-
-    Brain-JEPA checkpoints store the EMA encoder under the 'target_encoder' key.
-    Keys have 'module.' prefix that needs to be removed (from DDP training).
-
-    Args:
-        encoder: Initialized encoder model to load weights into.
-        ckpt_path: Path to checkpoint file (.pth.tar).
-
-    Returns:
-        Encoder with loaded weights.
+    Returns Encoder with loaded weights.
     """
     ckpt_path = Path(ckpt_path)
     if not ckpt_path.exists():
