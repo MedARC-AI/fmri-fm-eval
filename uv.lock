@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'linux'",
@@ -372,7 +372,7 @@ wheels = [
 [[package]]
 name = "brain-jepa"
 version = "0.1.0"
-source = { git = "https://github.com/MedARC-AI/Brain-JEPA.git?rev=6ed3aa3a74080b4d1a214f8157946e1269cb60fc#6ed3aa3a74080b4d1a214f8157946e1269cb60fc" }
+source = { git = "https://github.com/MedARC-AI/Brain-JEPA.git?rev=c43f8a647b948000ec1a92c4ea6f5efb4efc27f1#c43f8a647b948000ec1a92c4ea6f5efb4efc27f1" }
 dependencies = [
     { name = "einops" },
     { name = "matplotlib" },
@@ -864,7 +864,7 @@ brain-jepa = [
 
 [package.metadata]
 requires-dist = [
-    { name = "brain-jepa", marker = "extra == 'brain-jepa'", git = "https://github.com/MedARC-AI/Brain-JEPA.git?rev=6ed3aa3a74080b4d1a214f8157946e1269cb60fc" },
+    { name = "brain-jepa", marker = "extra == 'brain-jepa'", git = "https://github.com/MedARC-AI/Brain-JEPA.git?rev=c43f8a647b948000ec1a92c4ea6f5efb4efc27f1" },
     { name = "cloudpathlib", extras = ["s3"] },
     { name = "datasets" },
     { name = "einops" },

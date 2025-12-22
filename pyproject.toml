@@ -49,7 +49,7 @@ version_file = "src/fmri_fm_eval/_version.py"
 [tool.uv.sources]
 nsdcode = { git = "https://github.com/cvnlab/nsdcode.git", rev = "bfd36a503cc90a3eb3ebfd69b269403f7e186924" }
 yaspy = { git = "https://github.com/childmindresearch/yaspy.git" }
-brain-jepa = { git = "https://github.com/MedARC-AI/Brain-JEPA.git", rev = "6ed3aa3a74080b4d1a214f8157946e1269cb60fc" }
+brain-jepa = { git = "https://github.com/MedARC-AI/Brain-JEPA.git", rev = "c43f8a647b948000ec1a92c4ea6f5efb4efc27f1" }
 
 [tool.ruff]
 line-length = 100
