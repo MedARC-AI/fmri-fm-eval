@@ -83,13 +83,13 @@ class BrainJEPATransform:
         self,
         num_frames: int = 160,
         target_tr: float = 2.0,
-        use_normalization: bool = False,
+        use_normalization: bool = True,
     ):
         """
         Args:
-            num_frames: Number of output frames after temporal sampling. Default 160.
-            target_tr: Target repetition time in seconds. Default 2.0.
-            use_normalization: Apply global mean/std normalization. Default False.
+            num_frames: Number of output frames after temporal sampling.
+            target_tr: Target repetition time in seconds.
+            use_normalization: Apply global mean/std normalization.
         """
         self.num_frames = num_frames
         self.target_tr = target_tr
@@ -107,6 +107,8 @@ class BrainJEPATransform:
         # Optional global normalization (Brain-JEPA style)
         # Normalization comes first in preprocessing pipeline
         # https://github.com/Eric-LRL/Brain-JEPA/blob/b1dfa93eb331d1e70476446b06fc8a1ac3c92345/src/datasets/hca_sex_datasets.py#L45
+        # This should be enabled by default during evaluation
+        # https://github.com/Eric-LRL/Brain-JEPA/blob/b1dfa93eb331d1e70476446b06fc8a1ac3c92345/scripts/classification/run_downstream_LP_hca_sex.sh#L17
         if self.use_normalization:
             mean = bold.mean()
             std = bold.std()
@@ -225,13 +227,14 @@ def load_brain_jepa_checkpoint(encoder: nn.Module, ckpt_path: str | Path) -> Non
         new_key = key.replace("module.", "")
         new_state_dict[new_key] = value
 
-    encoder.load_state_dict(new_state_dict)
+    # we added the gradient_pos_embed as a buffer, so it's not in the original ckpt
+    missing_keys, unexpected_keys = encoder.load_state_dict(new_state_dict, strict=False)
+    assert not unexpected_keys and missing_keys == ["gradient_pos_embed"]
 
 
 @register_model
 def brain_jepa_vitb_ep300(
-    attn_mode: str = "normal",
-    use_normalization: bool = False,
+    attn_mode: str = "sdpa",
 ) -> tuple[BrainJEPATransform, BrainJEPAModelWrapper]:
     """Create Brain-JEPA model and transform. Auto-downloads files if paths are None."""
     # Match the pretrained checkpoint
@@ -260,10 +263,6 @@ def brain_jepa_vitb_ep300(
     # Create wrapper
     model = BrainJEPAModelWrapper(encoder)
 
-    transform = BrainJEPATransform(
-        num_frames=crop_size[1],
-        target_tr=target_tr,
-        use_normalization=use_normalization,
-    )
+    transform = BrainJEPATransform(num_frames=crop_size[1], target_tr=target_tr)
 
     return transform, model
