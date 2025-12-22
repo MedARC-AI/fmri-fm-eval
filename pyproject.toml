@@ -12,7 +12,6 @@ dependencies = [
     "cloudpathlib[s3]",
     "datasets",
     "einops",
-    "gdown",
     "huggingface_hub",
     "ipython",
     "jupyter",
@@ -37,12 +36,20 @@ dependencies = [
     "yaspy",
 ]
 
+[project.optional-dependencies]
+
+brain-jepa = [
+    "gdown",
+    "brain-jepa",
+]
+
 [tool.setuptools_scm]
 version_file = "src/fmri_fm_eval/_version.py"
 
 [tool.uv.sources]
 nsdcode = { git = "https://github.com/cvnlab/nsdcode.git", rev = "bfd36a503cc90a3eb3ebfd69b269403f7e186924" }
 yaspy = { git = "https://github.com/childmindresearch/yaspy.git" }
+brain-jepa = { git = "https://github.com/MedARC-AI/Brain-JEPA.git", rev = "6ed3aa3a74080b4d1a214f8157946e1269cb60fc" }
 
 [tool.ruff]
 line-length = 100

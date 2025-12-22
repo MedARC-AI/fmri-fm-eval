@@ -8,10 +8,18 @@ from pathlib import Path
 import pandas as pd
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch import Tensor
 
 from fmri_fm_eval.models.base import Embeddings
 from fmri_fm_eval.models.registry import register_model
+
+try:
+    from brain_jepa.models.vision_transformer import vit_base
+except ImportError as exc:
+    raise ImportError(
+        "brain-jepa not installed. Please install the optional brain-jepa extra."
+    ) from exc
 
 
 # Cache directory for downloaded files
@@ -65,10 +73,10 @@ class BrainJEPATransform:
 
     Preprocessing steps:
     1. Unnormalize BOLD data using mean and std
-    2. Resample to target TR if input TR differs from target
-    3. Temporal sampling: center crop and linearly sample to `num_frames` frames
-    4. Reshape: (T, D) -> (1, D, T) for Brain-JEPA's Conv2d patch embedding
-    5. Optional global normalization
+    2. Optional global normalization
+    3. Resample to target TR if input TR differs from target
+    4. Pad/crop input to target number of frames
+    5. Reshape: (T, D) -> (1, D, T) for Brain-JEPA's Conv2d patch embedding
     """
 
     def __init__(
@@ -90,16 +98,23 @@ class BrainJEPATransform:
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]:
         bold = sample["bold"]  # (T, D) - normalized per-ROI
         mean = sample["mean"]  # (1, D) - original means
-        std = sample["std"]    # (1, D) - original stds
-        tr = sample["tr"]      # float - repetition time
-        
+        std = sample["std"]  # (1, D) - original stds
+        tr = sample["tr"]  # float - repetition time
+
         # Unnormalize BOLD data
         bold = bold * std + mean
-        
-        T, D = bold.shape
+
+        # Optional global normalization (Brain-JEPA style)
+        # Normalization comes first in preprocessing pipeline
+        # https://github.com/Eric-LRL/Brain-JEPA/blob/b1dfa93eb331d1e70476446b06fc8a1ac3c92345/src/datasets/hca_sex_datasets.py#L45
+        if self.use_normalization:
+            mean = bold.mean()
+            std = bold.std()
+            bold = (bold - mean) / std
 
         # Resample to target TR if needed
-        if tr != self.target_tr:
+        # Allow some wiggle room, since the TR doesn't have to be exact.
+        if abs(tr - self.target_tr) >= 0.2:
             bold = self._resample_to_target_tr(bold, tr, self.target_tr)
 
         T, D = bold.shape
@@ -110,106 +125,46 @@ class BrainJEPATransform:
             pad_size = self.num_frames - T
             padding = roi_mean.unsqueeze(0).repeat(pad_size, 1)  # (pad_size, D)
             bold = torch.cat([bold, padding], dim=0)  # (num_frames, D)
-            T = bold.shape[0]
+        # Clip if too long
+        elif T > self.num_frames:
+            bold = bold[: self.num_frames]
 
         # Transpose to (D, T) to match Brain-JEPA's internal format
         bold = bold.T  # (D, T)
-        T = bold.shape[1]  # Update T after transpose
-
-        # Apply temporal sampling to num_frames if needed
-        if T != self.num_frames:
-            # Center crop: use all available frames, then sample to num_frames
-            start_idx, end_idx = self._get_start_end_idx(T, T)
-            bold = self._temporal_sampling(bold, start_idx, end_idx, self.num_frames)
 
         # Add channel dimension: (D, T) -> (1, D, T)
         bold = bold.unsqueeze(0)  # (1, D, T)
 
-        # Optional global normalization (Brain-JEPA style)
-        if self.use_normalization:
-            mean = bold.mean()
-            std = bold.std()
-            bold = (bold - mean) / (std + 1e-6)
-
         # Update sample in place
-        sample["bold"] = bold.to(torch.float32)
+        sample["bold"] = bold.contiguous().to(torch.float32)
         return sample
 
     def _resample_to_target_tr(self, bold: Tensor, tr: float, target_tr: float) -> Tensor:
         """
         Resample time series to target TR using linear interpolation.
         """
-        if tr == target_tr:
-            return bold
-        
         T, D = bold.shape
-        
+
         # Calculate new length
         duration = tr * T
         new_length = int(duration / target_tr)
-        
+
         # Transpose to (D, T) for interpolation, then add batch and channel dims: (1, D, T)
         bold_t = bold.T.unsqueeze(0)  # (1, D, T)
-        
+
         # Use 1D interpolation (works on last dimension)
-        bold_resampled = torch.nn.functional.interpolate(
+        # Nearest interpolation for downsampling following official Brain-JEPA
+        # implementation
+        # https://github.com/Eric-LRL/Brain-JEPA/blob/b1dfa93eb331d1e70476446b06fc8a1ac3c92345/src/datasets/hca_sex_datasets.py#L88
+        mode = "nearest" if target_tr > tr else "linear"
+        bold_resampled = F.interpolate(
             bold_t,
             size=new_length,
-            mode='linear',
-            align_corners=False,
+            mode=mode,
         )  # (1, D, T_new)
-        
+
         # Transpose back to (T_new, D)
         return bold_resampled.squeeze(0).T
-
-    def _get_start_end_idx(self, fmri_size: int, clip_size: int) -> tuple[float, float]:
-        """
-        Get start and end indices for center crop.
-
-        For evaluation, we use deterministic center crop instead of random sampling.
-
-        Reference: Brain-JEPA/src/datasets/hca_sex_datasets.py:_get_start_end_idx
-        (Modified: uses center crop instead of random for evaluation)
-
-        Args:
-            fmri_size: Total number of frames in the fMRI sequence.
-            clip_size: Desired clip size to extract.
-
-        Returns:
-            (start_idx, end_idx): Start and end frame indices.
-        """
-        clip_size = min(clip_size, fmri_size)  # Clamp to available frames
-        delta = max(fmri_size - clip_size, 0)
-
-        # Center crop for deterministic evaluation
-        start_idx = delta / 2.0
-        end_idx = start_idx + clip_size - 1
-
-        return start_idx, end_idx
-
-    def _temporal_sampling(
-        self, frames: Tensor, start_idx: float, end_idx: float, num_samples: int
-    ) -> Tensor:
-        """
-        Sample num_samples frames between start_idx and end_idx with equal interval.
-
-        This is copied directly from the original Brain-JEPA codebase.
-
-        Reference: Brain-JEPA/src/datasets/hca_sex_datasets.py:_temporal_sampling
-
-        Args:
-            frames: Tensor of shape (D, T) - ROIs x time points
-            start_idx: Start frame index (can be float for interpolation)
-            end_idx: End frame index (can be float for interpolation)
-            num_samples: Number of frames to sample
-
-        Returns:
-            Tensor of shape (D, num_samples) - temporally sampled frames
-        """
-        index = torch.linspace(start_idx, end_idx, num_samples)
-        index = torch.clamp(index, 0, frames.shape[1] - 1).long()
-        new_frames = torch.index_select(frames, 1, index)
-        return new_frames
 
 
 class BrainJEPAModelWrapper(nn.Module):
@@ -229,15 +184,9 @@ class BrainJEPAModelWrapper(nn.Module):
 
     __space__: str = "schaefer400_tians3"
 
-    def __init__(
-        self,
-        encoder: nn.Module,
-        gradient_pos_embed: Tensor,
-    ):
+    def __init__(self, encoder: nn.Module):
         super().__init__()
         self.encoder = encoder
-        # Register gradient as buffer (not a parameter, but should be saved/loaded)
-        self.register_buffer("gradient_pos_embed", gradient_pos_embed)
 
     def forward(self, batch: dict[str, Tensor]) -> Embeddings:
         x = batch["bold"]  # (B, 1, D, T)
@@ -254,116 +203,21 @@ class BrainJEPAModelWrapper(nn.Module):
         )
 
 
-def load_gradient_embeddings(
-    gradient_csv_path: str | Path | None = None,
-) -> Tensor:
+def load_gradient_embeddings(gradient_csv_path: str | Path) -> Tensor:
     """Load gradient embeddings from CSV. Auto-downloads if path is None."""
-    if gradient_csv_path is None:
-        gradient_csv_path = fetch_gradient_mapping()
-    gradient_csv_path = Path(gradient_csv_path)
-    if not gradient_csv_path.exists():
-        raise FileNotFoundError(
-            f"Gradient CSV not found at {gradient_csv_path}. "
-            "Please ensure the Brain-JEPA data directory is set up correctly."
-        )
     df = pd.read_csv(gradient_csv_path, header=None)
     gradient = torch.tensor(df.values, dtype=torch.float32)
     return gradient.unsqueeze(0)  # (1, 450, 30)
 
 
-def resolve_checkpoint_path(ckpt_path: str | Path | None) -> Path:
-    """Resolve checkpoint path. Auto-downloads from Google Drive if None."""
-    if ckpt_path is not None:
-        ckpt_path = Path(ckpt_path)
-        if ckpt_path.exists():
-            return ckpt_path
-        raise FileNotFoundError(
-            f"Checkpoint not found at {ckpt_path}. "
-            "Please provide a valid checkpoint path or ensure the default checkpoint is available."
-        )
-
-    return fetch_brain_jepa_checkpoint()
-
-
-def build_brain_jepa_encoder(
-    crop_size: tuple[int, int] = (450, 160),
-    patch_size: int = 16,
-    gradient_pos_embed: Tensor | None = None,
-    attn_mode: str = "normal",
-    add_w: str = "mapping",
-    gradient_checkpointing: bool = False,
-    device: torch.device | str = "cpu",
-):
-    """
-    Build Brain-JEPA encoder model using ViT-Base architecture.
-
-    This imports from the Brain-JEPA source code and initializes the encoder.
-
-    Args:
-        crop_size: (num_rois, num_frames) input size. Default (450, 160).
-        patch_size: Temporal patch size. Default 16.
-        gradient_pos_embed: Preloaded gradient embeddings tensor.
-        attn_mode: Attention mode ('normal', 'flash_attn').
-        add_w: Positional embedding mode ('origin', 'mapping').
-            'mapping' is used by pretrained checkpoint.
-        gradient_checkpointing: Enable gradient checkpointing for memory efficiency.
-
-    Returns:
-        Initialized encoder model.
-    """
-    # Import Brain-JEPA's vision transformer
-    import sys
-
-    brain_jepa_src = BRAIN_JEPA_CACHE_DIR.parent / "Brain-JEPA"
-    if not (brain_jepa_src.exists() and (brain_jepa_src / "src" / "models" / "vision_transformer.py").exists()):
-        raise FileNotFoundError(
-            f"Brain-JEPA repository not found at {brain_jepa_src}. "
-            "Please clone the repository: "
-            "git clone https://github.com/Eric-LRL/Brain-JEPA.git"
-        )
-    
-    brain_jepa_src = str(brain_jepa_src)
-
-    if brain_jepa_src not in sys.path:
-        sys.path.insert(0, brain_jepa_src)
-
-    import src.models.vision_transformer as vit
-
-    # Build encoder (always use vit_base)
-    encoder = vit.vit_base(
-        patch_size=patch_size,
-        img_size=(crop_size[0], crop_size[1]),
-        in_chans=1,
-        gradient_pos_embed=gradient_pos_embed,
-        attn_mode=attn_mode,
-        add_w=add_w,
-        gradient_checkpointing=gradient_checkpointing,
-    )
-    return encoder
-
-
-def load_brain_jepa_checkpoint(
-    encoder: nn.Module,
-    ckpt_path: str | Path,
-) -> nn.Module:
+def load_brain_jepa_checkpoint(encoder: nn.Module, ckpt_path: str | Path) -> None:
     """
     Load Brain-JEPA pretrained checkpoint into encoder.
-    Returns Encoder with loaded weights.
     """
-    ckpt_path = Path(ckpt_path)
-    if not ckpt_path.exists():
-        raise FileNotFoundError(f"Checkpoint not found at {ckpt_path}")
-
-    checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-
-    # Brain-JEPA stores EMA encoder as 'target_encoder'
-    if "target_encoder" in checkpoint:
-        state_dict = checkpoint["target_encoder"]
-    elif "encoder" in checkpoint:
-        state_dict = checkpoint["encoder"]
-    else:
-        # Assume the checkpoint is just the state dict
-        state_dict = checkpoint
+    # Following official Brain-JEPA checkpoint loading
+    # https://github.com/Eric-LRL/Brain-JEPA/blob/b1dfa93eb331d1e70476446b06fc8a1ac3c92345/downstream_tasks/main_linprobe.py#L97
+    checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+    state_dict = checkpoint["target_encoder"]
 
     # Remove 'module.' prefix from keys (from DDP training)
     new_state_dict = {}
@@ -371,54 +225,44 @@ def load_brain_jepa_checkpoint(
         new_key = key.replace("module.", "")
         new_state_dict[new_key] = value
 
-    # Load state dict
-    msg = encoder.load_state_dict(new_state_dict, strict=False)
-    if msg.missing_keys:
-        print(f"Warning: Missing keys when loading Brain-JEPA checkpoint: {msg.missing_keys}")
-    if msg.unexpected_keys:
-        print(f"Warning: Unexpected keys in Brain-JEPA checkpoint: {msg.unexpected_keys}")
-
-    return encoder
+    encoder.load_state_dict(new_state_dict)
 
 
 @register_model
-def brain_jepa(
-    ckpt_path: str | Path | None = None,
-    gradient_csv_path: str | Path | None = None,
+def brain_jepa_vitb_ep300(
+    attn_mode: str = "normal",
+    use_normalization: bool = False,
 ) -> tuple[BrainJEPATransform, BrainJEPAModelWrapper]:
     """Create Brain-JEPA model and transform. Auto-downloads files if paths are None."""
     # Match the pretrained checkpoint
     crop_size = (450, 160)
     patch_size = 16
-    attn_mode = "normal"
     add_w = "mapping"  # match pretrained checkpoint (ukb_vitb_ep300.yaml)
-    gradient_checkpointing = False
-    use_normalization = False
+    target_tr = 2.0
 
     # Load gradient positional embeddings
+    gradient_csv_path = fetch_gradient_mapping()
     gradient_pos_embed = load_gradient_embeddings(gradient_csv_path)
 
-    # Build encoder (always uses vit_base)
-    encoder = build_brain_jepa_encoder(
-        crop_size=crop_size,
+    encoder = vit_base(
+        img_size=crop_size,
         patch_size=patch_size,
+        in_chans=1,
         gradient_pos_embed=gradient_pos_embed,
         attn_mode=attn_mode,
         add_w=add_w,
-        gradient_checkpointing=gradient_checkpointing,
     )
 
-    # Resolve and load checkpoint (raises error if not found)
-    resolved_ckpt = resolve_checkpoint_path(ckpt_path)
-    print(f"Loading Brain-JEPA checkpoint from: {resolved_ckpt}")
-    encoder = load_brain_jepa_checkpoint(encoder, resolved_ckpt)
+    ckpt_path = fetch_brain_jepa_checkpoint()
+    print(f"Loading Brain-JEPA checkpoint from: {ckpt_path}")
+    load_brain_jepa_checkpoint(encoder, ckpt_path)
 
     # Create wrapper
-    model = BrainJEPAModelWrapper(encoder, gradient_pos_embed)
+    model = BrainJEPAModelWrapper(encoder)
 
     transform = BrainJEPATransform(
         num_frames=crop_size[1],
-        target_tr=2.0,
+        target_tr=target_tr,
         use_normalization=use_normalization,
     )
 
