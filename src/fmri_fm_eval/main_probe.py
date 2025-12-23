@@ -29,6 +29,7 @@ from fmri_fm_eval.heads import (
     ClassifierGrid,
     LinearClassifier,
     AttnPoolClassifier,
+    MLPClassifier,
     pool_representation,
 )
 from fmri_fm_eval.models.registry import create_model, list_models
@@ -340,12 +341,25 @@ def make_classifiers(
     if len(embed_shape) == 1:
         clf_fn = partial(LinearClassifier, embed_shape[-1], num_classes)
     else:
-        clf_fn = partial(
-            AttnPoolClassifier,
-            embed_shape[-1],
-            num_classes,
-            embed_dim=args.get("attn_pool_embed_dim"),
-        )
+        sequence_clf = args.get("sequence_classifier", "attn_pool")
+        if sequence_clf == "attn_pool":
+            clf_fn = partial(
+                AttnPoolClassifier,
+                embed_shape[-1],
+                num_classes,
+                embed_dim=args.get("attn_pool_embed_dim"),
+            )
+        elif sequence_clf == "mlp":
+            clf_fn = partial(
+                MLPClassifier,
+                embed_shape[-1],
+                num_classes,
+                hidden_dim=args.get("mlp_hidden_dim"),
+                num_layers=args.get("mlp_layers", 1),
+                dropout=args.get("mlp_dropout", 0.5),
+            )
+        else:
+            raise ValueError(f"Unknown sequence classifier: {sequence_clf}")
 
     # all classifiers get same init
     init_state = None
