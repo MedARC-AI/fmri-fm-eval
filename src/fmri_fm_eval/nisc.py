@@ -21,6 +21,7 @@ import nibabel as nib
 import scipy.interpolate
 import scipy.signal
 from matplotlib.tri import Triangulation
+from matplotlib.colors import LinearSegmentedColormap
 from nibabel.cifti2 import BrainModelAxis, Cifti2Image
 from scipy.sparse import coo_array
 from scipy.spatial import Delaunay
@@ -689,6 +690,31 @@ def resample_timeseries(
     new_length = int(tr * len(series) / new_tr)
     new_x = new_tr * np.arange(new_length)
 
-    interp = scipy.interpolate.interp1d(x, series, kind=kind, axis=0)
+    if kind == "pchip":
+        interp = scipy.interpolate.PchipInterpolator(x, series, axis=0)
+    else:
+        interp = scipy.interpolate.interp1d(x, series, kind=kind, axis=0)
     series = interp(new_x)
     return series
+
+
+# Plotting
+
+# from rick betzel's figures, hah
+FC_COLORS = np.array(
+    [
+        [64, 80, 160],
+        [64, 96, 176],
+        [96, 192, 240],
+        [144, 208, 224],
+        [255, 255, 255],
+        [240, 240, 96],
+        [240, 208, 64],
+        [224, 112, 64],
+        [224, 64, 48],
+    ],
+    dtype=np.uint8,
+)
+
+FC_CMAP = LinearSegmentedColormap.from_list("fc", FC_COLORS / 255.0)
+FC_CMAP.set_bad("gray")
