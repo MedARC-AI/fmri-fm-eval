@@ -108,6 +108,7 @@ def main(args: DictConfig):
             batch_size=args.batch_size,
             shuffle=split == "train",
             num_workers=args.num_workers,
+            prefetch_factor=args.prefetch_factor
         )
     # we could also support more splits or different split names, but for now can keep
     # things simple.
@@ -146,8 +147,9 @@ def main(args: DictConfig):
     ut.update_wd(param_groups, args.weight_decay)
     optimizer = torch.optim.AdamW(param_groups)
 
-    total_steps = args.epochs * args.steps_per_epoch
-    warmup_steps = args.warmup_epochs * args.steps_per_epoch
+    train_steps_per_epoch = math.ceil(len(train_loader) / args.accum_iter)
+    total_steps = args.epochs * train_steps_per_epoch
+    warmup_steps = args.warmup_epochs * train_steps_per_epoch
     lr_schedule = make_lr_schedule(args.lr, total_steps, warmup_steps)
     print(f"full schedule: epochs = {args.epochs} (steps = {total_steps})")
     print(f"warmup: epochs = {args.warmup_epochs} (steps = {warmup_steps})")
@@ -179,6 +181,7 @@ def main(args: DictConfig):
             train_loader,
             optimizer,
             lr_schedule,
+            train_steps_per_epoch,
             epoch,
             device,
         )
@@ -194,7 +197,7 @@ def main(args: DictConfig):
         )
 
         if log_wandb:
-            wandb.log(val_stats, (epoch + 1) * args.steps_per_epoch)
+            wandb.log(val_stats, (epoch + 1) * train_steps_per_epoch)
 
         hparam_id, hparam, loss = get_best_hparams(model, val_stats)
         hparam_fmt = format_hparam(hparam_id, hparam)
@@ -213,7 +216,7 @@ def main(args: DictConfig):
             best_stats["validation/acc1_best"] = val_stats[f"validation/acc1_{hparam_fmt}"]
 
         if log_wandb:
-            wandb.log(best_stats, (epoch + 1) * args.steps_per_epoch)
+            wandb.log(best_stats, (epoch + 1) * train_steps_per_epoch)
 
         merged_stats = {"epoch": epoch, **train_stats, **val_stats, **best_stats}
         with (output_dir / "train_log.json").open("a") as f:
@@ -294,7 +297,7 @@ def main(args: DictConfig):
         print(json.dumps(eval_stats), file=f)
 
     if log_wandb:
-        wandb.log(eval_stats, args.epochs * args.steps_per_epoch)
+        wandb.log(eval_stats, args.epochs * train_steps_per_epoch)
 
     total_time = time.monotonic() - start_time
     print(f"done! total time: {datetime.timedelta(seconds=int(total_time))}")
@@ -391,6 +394,7 @@ def train_one_epoch(
     data_loader: Iterable,
     optimizer: torch.optim.Optimizer,
     lr_schedule: Sequence[float],
+    steps_per_epoch: int,
     epoch: int,
     device: torch.device,
 ):
@@ -398,7 +402,6 @@ def train_one_epoch(
     use_cuda = device.type == "cuda"
     log_wandb = args.wandb and ut.is_main_process()
     print_freq = args.get("print_freq", 20) if not args.debug else 1
-    epoch_num_batches = args.steps_per_epoch * args.accum_iter if not args.debug else 10
 
     metric_logger = ut.MetricLogger(delimiter="  ")
     metric_logger.add_meter("lr", ut.SmoothedValue(window_size=1, fmt="{value:.6f}"))
@@ -407,15 +410,17 @@ def train_one_epoch(
 
     num_classifiers = len(model.classifiers)
 
-    data_loader = ut.infinite_data_wrapper(data_loader)
     optimizer.zero_grad()
 
     for batch_idx, batch in enumerate(
-        metric_logger.log_every(data_loader, print_freq, header, epoch_num_batches)
+        metric_logger.log_every(data_loader, print_freq, header, len(data_loader))
     ):
+        if args.debug and batch_idx >= 10:
+            break
+
         batch = ut.send_data(batch, device)
 
-        global_step = epoch * args.steps_per_epoch + (batch_idx + 1) // args.accum_iter
+        global_step = epoch * steps_per_epoch + (batch_idx + 1) // args.accum_iter
         need_update = (batch_idx + 1) % args.accum_iter == 0
         if need_update:
             lr = lr_schedule[global_step - 1]
@@ -483,10 +488,6 @@ def train_one_epoch(
 
             for k, v in all_metric_dict.items():
                 all_meters[k].update(v)
-
-            if log_wandb:
-                wandb.log({f"train/{k}": v for k, v in log_metric_dict.items()}, global_step)
-                wandb.log({f"train/{k}": v for k, v in all_metric_dict.items()}, global_step)
 
         if use_cuda:
             torch.cuda.synchronize()

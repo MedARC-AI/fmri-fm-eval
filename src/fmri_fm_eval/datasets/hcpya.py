@@ -1,9 +1,11 @@
 import os
 
 import datasets as hfds
+import numpy as np
 
 from fmri_fm_eval.datasets.base import HFDataset
 from fmri_fm_eval.datasets.registry import register_dataset
+import fmri_fm_eval.nisc as nisc
 
 # TODO: package specific cache dir?
 
@@ -26,6 +28,22 @@ HCPYA_TARGET_NUM_CLASSES = {
 }
 
 
+def _resample_to_1s_tr(sample):
+    """Resample timeseries from original TR to TR=1.0s"""
+    bold = np.array(sample['bold'])
+    if abs(sample['tr'] - 1.0) > 0.01:
+        bold = nisc.resample_timeseries(
+            bold,
+            tr=sample['tr'],
+            new_tr=1.0,
+            kind='linear'
+        )
+        sample['bold'] = bold.astype(np.float16)
+        sample['tr'] = 1.0
+        sample['end'] = len(bold)
+    return sample
+
+
 def _create_hcpya_rest1lr(space: str, target: str, **kwargs):
     target_key = "sub"
     target_map_path = HCPYA_TARGET_MAP_DICT[target]
@@ -36,6 +54,7 @@ def _create_hcpya_rest1lr(space: str, target: str, **kwargs):
     for split in splits:
         url = f"{HCPYA_ROOT}/hcpya-rest1lr.{space}.arrow/{split}"
         dataset = hfds.load_dataset("arrow", data_files=f"{url}/*.arrow", split="train", **kwargs)
+        dataset = dataset.map(_resample_to_1s_tr, num_proc=8, desc=f"Resampling {split}")
         dataset = HFDataset(
             dataset,
             target_map_path=target_map_path,
