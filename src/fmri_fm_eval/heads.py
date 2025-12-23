@@ -116,3 +116,57 @@ class AttnPoolClassifier(nn.Module):
         x = F.scaled_dot_product_attention(q, k, v)  # [B, head, 1, D_head]
         x = x.reshape(B, D)  # [B, D]
         return self.linear(x)
+
+
+class MLPClassifier(nn.Module):
+    def __init__(
+        self,
+        in_dim: int,
+        out_dim: int,
+        hidden_dim: int | None = None,
+        num_layers: int = 1,
+        dropout: float = 0.5,
+    ):
+        super().__init__()
+        if num_layers < 1:
+            raise ValueError("MLPClassifier requires at least one layer.")
+
+        hidden_dim = hidden_dim or in_dim
+        self.activation = nn.ReLU()
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else None
+
+        layers = []
+        dim_in = in_dim
+        for _ in range(num_layers):
+            block = nn.Sequential(
+                nn.Linear(dim_in, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+            )
+            layers.append(block)
+            dim_in = hidden_dim
+            
+        self.layers = nn.ModuleList(layers)
+        self.output_proj = nn.Linear(hidden_dim, out_dim)
+        self.init_weights()
+
+    def init_weights(self):
+        for module in [*self.layers, self.output_proj]:
+            if isinstance(module, nn.Sequential) or isinstance(module, nn.Module):
+                for layer in module.modules():
+                    if isinstance(layer, nn.Linear):
+                        nn.init.trunc_normal_(layer.weight, std=0.02)
+                        nn.init.zeros_(layer.bias)
+
+    def forward(self, feat_tokens: Tensor) -> Tensor:
+        B, T, D = feat_tokens.shape
+        x = feat_tokens.reshape(B * T, D)
+
+        for block in self.layers:
+            x = block(x)
+            x = self.activation(x)
+            if self.dropout is not None:
+                x = self.dropout(x)
+
+        x = self.output_proj(x)
+        x = x.reshape(B, T, -1)
+        return x.mean(dim=1)
