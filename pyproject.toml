@@ -31,6 +31,7 @@ dependencies = [
     "tabulate",
     "torch",
     "tqdm",
+    "transformers>=4.57.3",
     "wandb",
     "webdataset",
     "yaspy",
