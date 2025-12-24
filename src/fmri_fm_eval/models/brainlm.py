@@ -9,6 +9,8 @@ Supports three model sizes from HuggingFace Hub (vandijklab/brainlm):
 All models use 200 timepoints with sliding window evaluation.
 """
 
+import os
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -19,14 +21,17 @@ from torch import Tensor
 from fmri_fm_eval.models.base import Embeddings
 from fmri_fm_eval.models.registry import register_model
 
+brainlm_repo_path = os.getenv("BRAINLM_REPO_PATH")
+if brainlm_repo_path:
+    sys.path.append(brainlm_repo_path)
+
 try:
     from brainlm_mae.modeling_vit_mae_with_padding import ViTMAEForPreTraining
     from brainlm_mae.modeling_brainlm import BrainLMForPretraining
-    from brainlm_mae.configuration_brainlm import BrainLMConfig
 except ImportError as exc:
     raise ImportError(
-        "BrainLM code not found. Please add BrainLM repository to your Python path: "
-        "git clone https://github.com/vandijklab/BrainLM.git && export PYTHONPATH=$PYTHONPATH:/path/to/BrainLM"
+        "BrainLM code not found. Set BRAINLM_REPO_PATH to the BrainLM repo path "
+        "(git clone https://github.com/vandijklab/BrainLM.git)."
     ) from exc
 
 
@@ -48,11 +53,13 @@ class BrainLMTransform:
     Based on train_vit_mae_on_fMRI_images.py preprocess_images() function.
 
     Preprocessing steps:
-    1. Extract sliding windows (200 timepoints each, stride=200)
-    2. Transpose: (T, D) -> (D, T)
-    3. Reorder voxels by Y coordinate
-    4. Scale by max_val (dataset-specific, default for RobustScaler normalization)
-    5. Repeat for 3 channels (R,G,B)
+    0. Unnormalize per-voxel z-scored data using mean/std
+    1. Apply voxelwise RobustScaler normalization (median/IQR across time)
+    2. Extract sliding windows (200 timepoints each, stride=200)
+    3. Transpose: (T, D) -> (D, T)
+    4. Reorder voxels by Y coordinate
+    5. Scale by max_val (dataset-specific, default for RobustScaler normalization)
+    6. Repeat for 3 channels (R,G,B) for ViTMAE variants
 
     Output: (num_windows, 3, 424, 200) - model handles padding to (3, 432, 432)
     """
@@ -63,6 +70,7 @@ class BrainLMTransform:
         num_timepoints: int = 200,
         window_stride: int = 200,
         max_val_to_scale: float = 5.6430855,  # Default for RobustScaler normalization
+        repeat_channels: bool = True,
     ):
         """
         Args:
@@ -76,6 +84,7 @@ class BrainLMTransform:
         self.num_timepoints = num_timepoints
         self.window_stride = window_stride
         self.max_val_to_scale = max_val_to_scale
+        self.repeat_channels = repeat_channels
 
         # Load voxel reordering indices from coords dataset
         from datasets import load_from_disk
@@ -85,11 +94,28 @@ class BrainLMTransform:
         self.reorder_indices = sorted(
             range(len(voxel_y_coords)), key=lambda k: voxel_y_coords[k]
         )
+        voxel_x_coords = coords_ds["X"]
+        voxel_z_coords = coords_ds["Z"]
+        coords = torch.tensor(
+            [voxel_x_coords, voxel_y_coords, voxel_z_coords], dtype=torch.float32
+        ).T
+        self.xyz_vectors = coords[self.reorder_indices]
 
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor] | None:
-        bold = sample["bold"]  # (T, D) - normalized data
-        # BrainLM training uses RobustScaler (median=0, IQR scaled)
-        # fmri-fm-eval uses z-score (mean=0, std=1) - max_val will differ!
+        bold = sample["bold"]  # (T, D) - z-score normalized data
+        mean = sample["mean"]  # (1, D)
+        std = sample["std"]  # (1, D)
+
+        # Convert z-scored data back to raw signal, then apply voxelwise RobustScaler.
+        bold = bold.to(torch.float32) * std.to(torch.float32) + mean.to(torch.float32)
+        median = torch.quantile(bold, 0.5, dim=0, keepdim=True)
+        q1 = torch.quantile(bold, 0.25, dim=0, keepdim=True)
+        q3 = torch.quantile(bold, 0.75, dim=0, keepdim=True)
+        iqr = q3 - q1
+        eps = 1e-6
+        valid_mask = iqr > eps
+        bold = (bold - median) / iqr.clamp(min=eps)
+        bold = bold * valid_mask
 
         T, D = bold.shape
 
@@ -115,8 +141,9 @@ class BrainLMTransform:
             # Scale by max_val (dataset-specific!)
             window = window / self.max_val_to_scale
 
-            # Repeat for 3 channels (R,G,B)
-            window = window.unsqueeze(0).repeat(3, 1, 1)  # (3, 424, 200)
+            # Repeat for 3 channels (R,G,B) for ViTMAE variants.
+            if self.repeat_channels:
+                window = window.unsqueeze(0).repeat(3, 1, 1)  # (3, 424, 200)
 
             # Model handles padding (424,200) -> (432,432) internally
             windows.append(window.contiguous().to(torch.float32))
@@ -130,6 +157,7 @@ class BrainLMTransform:
             torch.stack(windows) if len(windows) > 1 else windows[0].unsqueeze(0)
         )
         # Shape: (num_windows, 3, 424, 200)
+        sample["xyz"] = self.xyz_vectors
 
         return sample
 
@@ -160,12 +188,13 @@ class BrainLMModelWrapper(nn.Module):
         self.model_type = model_type
 
     def forward(self, batch: dict[str, Tensor]) -> Embeddings:
-        pixel_values = batch["bold"]  # (B, 3, 424, 200)
+        pixel_values = batch["bold"]
 
         if self.model_type == "vitmae":
+            pixel_values = pixel_values.squeeze(0)
             return self._forward_vitmae(pixel_values)
-        else:
-            return self._forward_brainlm(pixel_values)
+
+        return self._forward_brainlm(batch)
 
     def _forward_vitmae(self, pixel_values: Tensor) -> Embeddings:
         """Forward pass for ViTMAE models (111M, 650M)."""
@@ -174,8 +203,12 @@ class BrainLMModelWrapper(nn.Module):
         self.backbone.vit.embeddings.config.mask_ratio = 0.0
 
         with torch.set_grad_enabled(False):
-            encoder_outputs = self.backbone.vit(pixel_values)
-            sequence_output = encoder_outputs.last_hidden_state
+            outputs = self.backbone(
+                pixel_values,
+                output_hidden_states=True,
+                return_dict=True,
+            )
+            sequence_output = outputs.hidden_states[-1]
 
         # Split CLS and patch tokens
         cls_embeds = sequence_output[:, 0, :]  # (B, embed_dim)
@@ -187,15 +220,31 @@ class BrainLMModelWrapper(nn.Module):
             patch_embeds=patch_embeds,
         )
 
-    def _forward_brainlm(self, pixel_values: Tensor) -> Embeddings:
+    def _forward_brainlm(self, batch: dict[str, Tensor]) -> Embeddings:
         """Forward pass for legacy BrainLM model (13M)."""
         # Set mask_ratio to 0 to disable masking during inference
-        original_mask_ratio = self.backbone.brainlm.embeddings.config.mask_ratio
-        self.backbone.brainlm.embeddings.config.mask_ratio = 0.0
+        self.backbone.vit.embeddings.config.mask_ratio = 0.0
+
+        bold = batch["bold"]
+        signal_vectors = bold[:, 0, :, :]
+        batch_size = signal_vectors.shape[0]
+
+        xyz_vectors = batch.get("xyz")
+        if xyz_vectors is None:
+            raise ValueError("Missing xyz vectors for BrainLM 13M model input.")
+
+        if xyz_vectors.ndim == 2:
+            xyz_vectors = xyz_vectors.unsqueeze(0).expand(batch_size, -1, -1)
+        elif xyz_vectors.shape[0] != batch_size:
+            raise ValueError("xyz batch size does not match signal batch size.")
 
         with torch.set_grad_enabled(False):
-            # Model handles padding internally
-            encoder_outputs = self.backbone.brainlm(pixel_values)
+            encoder_outputs = self.backbone.vit(
+                signal_vectors=signal_vectors,
+                xyz_vectors=xyz_vectors,
+                output_hidden_states=True,
+                return_dict=True,
+            )
             sequence_output = encoder_outputs.last_hidden_state
             # sequence_output: (B, 1 + num_patches, embed_dim)
 
@@ -250,6 +299,8 @@ def load_brainlm_from_hf(
         )
         model_type = "brainlm"
 
+    model.config.train_mode = "auto_encode"
+
     return model, model_type
 
 
@@ -284,6 +335,7 @@ def create_brainlm_model(
         window_stride=200,
         max_val_to_scale=max_val_to_scale,
         coords_dataset_path=coords_dataset_path,
+        repeat_channels=variant in ["111m", "650m"],
     )
 
     return transform, model
