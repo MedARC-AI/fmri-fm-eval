@@ -53,6 +53,7 @@ plugin](https://packaging.python.org/en/latest/guides/creating-and-discovering-p
 
 import torch.nn as nn
 from torch import Tensor
+import torch.nn.functional as F 
 
 from fmri_fm_eval.models.base import Embeddings
 from fmri_fm_eval.models.registry import register_model
@@ -61,6 +62,7 @@ import numpy as np
 import torch
 from fmri_fm_eval import nisc
 from einops import rearrange
+
 
 try:
     from swiftfmri.pl_classifier import LitClassifier
@@ -157,8 +159,6 @@ class SwiftWrapper(nn.Module):
 
     def forward(self, batch: dict[str, Tensor]) -> Embeddings:
         x = batch['bold']
-        print("batch.keys(): ", batch.keys())
-        print("batch bold shape: ", batch['bold'].shape)
         if x.ndim != 6:
             raise ValueError(
                 f"Expected batch['x'] to be 6D (B, C, H, W, D, T), got shape {tuple(x.shape)}"
@@ -167,7 +167,6 @@ class SwiftWrapper(nn.Module):
         feats = self.backbone(x) # feats have shape (B, channels, H, W, D, T) (B, 288, 2, 2, 2, 20)
         feats = rearrange(feats, 'b c x y z t -> b (x y z t) c') # convert to (B, patches, channels)
 
-        print("feats shape: ", feats.shape)
         return Embeddings(
             cls_embeds=None,
             reg_embeds=None,
