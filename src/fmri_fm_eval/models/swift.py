@@ -165,7 +165,7 @@ class SwiftWrapper(nn.Module):
             )
 
         feats = self.backbone(x) # feats have shape (B, channels, H, W, D, T) (B, 288, 2, 2, 2, 20)
-        feats = rearrange(feats, 'b c x y z t -> b (x y z t) c')
+        feats = rearrange(feats, 'b c x y z t -> b (x y z t) c') # convert to (B, patches, channels)
 
         print("feats shape: ", feats.shape)
         return Embeddings(
@@ -210,11 +210,13 @@ class SwiftTransform:
         temporal_mode: str = "start", # "start" | "center" | "random" | "stride" 
         temporal_stride: int | None = None, # used if temporal_mode="stride"
     ):
+
+        # Mask calculation from fmri_fm_eval.readers
         roi_path = nisc.fetch_schaefer(400, space="mni")
-        # Mask calculation matches fmri_fm_eval.readers.mni_reader
         mask = nisc.read_nifti_data(roi_path) > 0 # (Z, Y, X)
-        self.mask_shape = mask.shape
+
         self.mask = torch.from_numpy(mask)
+        self.mask_shape = mask.shape
 
         self.expected_seq_len = expected_seq_len
         self.scaling_method = scaling_method
@@ -226,227 +228,250 @@ class SwiftTransform:
 
     def _temporal_select(self, x: Tensor) -> Tensor:
         """
-        x: (B, T, X, Y, Z)
-        returns: (B, T', X, Y, Z) where T' == expected_seq_len
+        Selects/pads the temporal dimension of the input volume to the expected sequence length.
+        
+        Args:
+            x: (T, X, Y, Z)
+        Returns:
+            (expected_seq_len, X, Y, Z)
         """
-        B, T, X, Y, Z = x.shape
-        L = self.expected_seq_len
+        T = x.shape[0]
+        target_len = self.expected_seq_len
 
-        if T == L:
+        if T == target_len:
             return x
+        
+        # Pad if too short - repeat last frame
+        if T < target_len:
+            last_frame = repeat(x[-1], 'x y z -> t x y z', t=target_len - T)
+            return torch.cat([x, last_frame], dim=0)
+        
+        # Crop if too long
+        if self.temporal_mode == "start":
+            return x[:target_len]
+        
+        elif self.temporal_mode == "center":
+            start = (T - target_len) // 2
+            return x[start:start + target_len]
+        
+        elif self.temporal_mode == "random":
+            start = torch.randint(0, T - target_len + 1, (1,)).item()
+            return x[start:start + target_len]
+        
+        elif self.temporal_mode == "stride":
+            stride = self.temporal_stride or max(T // target_len, 1)
+            indices = torch.arange(0, stride * target_len, stride)
+            indices = torch.clamp(indices, max=T - 1)
+            return x[indices]
+        
+        else:
+            raise ValueError(f"Unknown temporal mode: {self.temporal_mode}")
 
-        if T > L:
-            if self.temporal_mode == "start":
-                return x[:, :L]
-            elif self.temporal_mode == "center":
-                s = (T - L) // 2
-                return x[:, s:s+L]
-            elif self.temporal_mode == "random":
-                s = torch.randint(0, T - L + 1, (1,), device=x.device).item()
-                return x[:, s:s+L]
-            elif self.temporal_mode == "stride":
-                stride = self.temporal_stride
-                if stride is None:
-                    stride = max(T // L, 1)
-                idx = torch.arange(0, stride * L, stride, device=x.device)
-                idx = torch.clamp(idx, max=T-1)
-                return x.index_select(1, idx)
-            else:
-                raise ValueError(f"Unknown temporal mode: {self.temporal_mode}")
-
-        # T < L: pad by repeating last frame
-        pad_n = L - T
-        last = x[:, -1:].expand(B, pad_n, X, Y, Z)
-        return torch.cat([x, last], dim=1)
-
-    def _global_scale_and_fill_bg(self, x: Tensor, eps: float = 1e-6) -> tuple[Tensor, Tensor]:
+    def _scale_frame(self, frame: Tensor, mask: Tensor, eps: float = 1e-6) -> Tensor:
         """
-        x: (B,T,X,Y,Z), background defined as x==0
-        returns: (x_scaled_filled, fill_val_per_sample)
+        Scales globally a single 3D frame, see https://github.com/Transconnectome/SwiFT/blob/0b07cb156d77a7de33078c8f6fe3ddffa7b5ae9c/project/module/utils/data_preprocess_and_load/preprocessing.py#L32C1-L37C107
+        
+        Args:
+            frame: (X, Y, Z) single timepoint
+            mask: (X, Y, Z) brain mask
+            
+        Returns:
+            (X, Y, Z) scaled frame
         """
-        # background mask from *original* background (zeros introduced by unflatten)
-        mask = x != 0
-        xf = x.float()
-        mf = mask.float()
-
-        B = x.shape[0]
-        count = mf.sum(dim=(1,2,3,4)).clamp_min(1.0)
-
-        # each frame is globally scaled across the 4D volume: https://github.com/Transconnectome/SwiFT/blob/0b07cb156d77a7de33078c8f6fe3ddffa7b5ae9c/project/module/utils/data_preprocess_and_load/preprocessing.py#L32C1-L37C107
+        frame_f = frame.float()
+        mask_f = mask.float()
+        
+        # Count brain voxels
+        brain_voxels = frame_f[mask]
+        n_voxels = brain_voxels.numel()
+        
+        if n_voxels == 0:
+            return frame  # if no brain voxels, return as-is, can this happen??
+        
         if self.scaling_method == "z-norm":
-            s1 = (xf * mf).sum(dim=(1,2,3,4))
-            s2 = (xf.square() * mf).sum(dim=(1,2,3,4))
-            mean = s1 / count
-            var = (s2 / count) - mean.square()
-            std = torch.sqrt(torch.clamp(var, min=eps))
-
-            mean_ = mean.view(B,1,1,1,1)
-            std_  = std.view(B,1,1,1,1)
-            x_temp = (xf - mean_) / std_
-
+            mean = brain_voxels.mean()
+            std = brain_voxels.std(unbiased=False).clamp_min(eps)
+            return (frame_f - mean) / std
+        
         elif self.scaling_method == "minmax":
-            inf = torch.tensor(float("inf"), device=x.device)
-            ninf = torch.tensor(float("-inf"), device=x.device)
-
-            x_for_min = torch.where(mask, xf, inf)
-            x_for_max = torch.where(mask, xf, ninf)
-
-            vmin = x_for_min.amin(dim=(1,2,3,4))
-            vmax = x_for_max.amax(dim=(1,2,3,4))
-
-            vmin_ = vmin.view(B,1,1,1,1)
-            vmax_ = vmax.view(B,1,1,1,1)
-            denom = (vmax_ - vmin_).clamp_min(eps)
-
-            x_temp = (xf - vmin_) / denom
+            vmin = brain_voxels.min()
+            vmax = brain_voxels.max()
+            denom = (vmax - vmin).clamp_min(eps)
+            return (frame_f - vmin) / denom
+        
         else:
             raise ValueError("scaling_method must be 'z-norm' or 'minmax'")
 
-        # find the min value of the brain after scaling for each sample
-        inf = torch.tensor(float("inf"), device=x.device)
-        x_for_min = torch.where(mask, x_temp, inf)
-        brain_min = x_for_min.amin(dim=(1,2,3,4)) 
 
-        # fill the background with the min value of the brain after scaling or zeros if fill_zeroback is True, see: https://github.com/Transconnectome/SwiFT/blob/0b07cb156d77a7de33078c8f6fe3ddffa7b5ae9c/project/module/utils/data_preprocess_and_load/preprocessing.py#L39C5-L40C88
-        fill_val = torch.zeros_like(brain_min) if self.fill_zeroback else brain_min
-        fill_ = fill_val.view(B,1,1,1,1)
-
-        x_filled = torch.where(mask, x_temp, fill_)
-        return x_filled.to(dtype=x.dtype), fill_val.to(dtype=x.dtype)
-
-    def _center_crop_pad_to(self, x: Tensor, fill_val: Tensor) -> Tensor:
+    def _scale_and_fill_volume(self, x: Tensor, eps: float = 1e-6) -> tuple[Tensor, Tensor]:
         """
-        x: (B,T,X,Y,Z) -> (B,T,96,96,96) with center crop/pad.
-        fill_val: (B,) used for padding regions (per-sample background fill)
+        Scales each frame independently and fill background,
+        and fills the background with the min value of the current frame after scaling or zeros if fill_zeroback is True,
+        by default we're using the min value as original code, see: https://github.com/Transconnectome/SwiFT/blob/0b07cb156d77a7de33078c8f6fe3ddffa7b5ae9c/project/module/utils/data_preprocess_and_load/preprocessing.py#L39C5-L40C88
+        
+        Args:
+            x: (T, X, Y, Z) volume
+            
+        Returns:
+            scaled_filled: (T, X, Y, Z) processed volume
+            fill_values: (T,) fill value used per frame, required for padding
         """
-        B, T, X, Y, Z = x.shape
+        T, X, Y, Z = x.shape
+        
+        brain_mask = x != 0  # (T, X, Y, Z)
+        
+        scaled = torch.empty_like(x)
+        fill_values = torch.empty(T, device=x.device, dtype=x.dtype)
+        
+        for t in range(T):
+            frame = x[t]  # (X, Y, Z)
+            mask_t = brain_mask[t]  # (X, Y, Z)
+            
+            # Scale frame
+            scaled[t] = self._scale_frame(frame, mask_t, eps)
+            
+            if self.fill_zeroback:
+                # just use zeros
+                fill_values[t] = 0.0
+            else:
+                # get minimum
+                brain_voxels = scaled[t][mask_t]
+                fill_values[t] = brain_voxels.min() if brain_voxels.numel() > 0 else 0.0
+            
+            # fill background with corresponding value
+            scaled[t] = torch.where(mask_t, scaled[t], fill_values[t])
+        
+        return scaled, fill_values
+
+    def _scale_brain_voxels(self, x: Tensor, mask: Tensor, eps: float = 1e-6) -> Tensor:
+        """
+        Apply global scaling to brain voxels, for each volume independently.
+        
+        Args:
+            x: (T, X, Y, Z) input volume
+            mask: (T, X, Y, Z) brain mask, true for voxel.
+        
+        Returns:
+            (T, X, Y, Z) scaled volume
+        """
+        B, T = x.shape[:2]
+        xf = x.float()
+        mf = mask.float()
+        
+        count = rearrange(mf, 'b t x y z -> b t (x y z)').sum(dim=2)
+        count = count.clamp_min(1.0)
+        
+        # each frame is globally scaled: https://github.com/Transconnectome/SwiFT/blob/0b07cb156d77a7de33078c8f6fe3ddffa7b5ae9c/project/module/utils/data_preprocess_and_load/preprocessing.py#L32C1-L37C107
+        if self.scaling_method == "z-norm":
+            brain_sum = rearrange(xf * mf, 'b t x y z -> b t (x y z)').sum(dim=2)
+            brain_sq_sum = rearrange(xf.square() * mf, 'b t x y z -> b t (x y z)').sum(dim=2)
+            
+            mean = brain_sum / count  # (B, T)
+            var = (brain_sq_sum / count) - mean.square()
+            std = torch.sqrt(torch.clamp(var, min=eps))  # (B, T)
+            
+            mean = rearrange(mean, 'b t -> b t 1 1 1')
+            std = rearrange(std, 'b t -> b t 1 1 1')
+            return (xf - mean) / std
+        
+        elif self.scaling_method == "minmax":
+            inf = torch.tensor(float("inf"), device=x.device)
+            ninf = torch.tensor(float("-inf"), device=x.device)
+            
+            x_for_min = torch.where(mask, xf, inf)
+            x_for_max = torch.where(mask, xf, ninf)
+            
+            vmin = rearrange(x_for_min, 'b t x y z -> b t (x y z)').amin(dim=2)  # (B, T)
+            vmax = rearrange(x_for_max, 'b t x y z -> b t (x y z)').amax(dim=2)  # (B, T)
+            
+            vmin = rearrange(vmin, 'b t -> b t 1 1 1')
+            vmax = rearrange(vmax, 'b t -> b t 1 1 1')
+            denom = (vmax - vmin).clamp_min(eps)
+            
+            return (xf - vmin) / denom
+        
+        else:
+            raise ValueError("scaling_method must be 'z-norm' or 'minmax'")
+
+    def _center_crop_or_pad(self, x: Tensor, fill_val: Tensor) -> Tensor:
+        """
+        Center crop or pad volume to target spatial size,
+        odd padding goes to left, same as original implementation, see: https://github.com/Transconnectome/SwiFT/blob/0b07cb156d77a7de33078c8f6fe3ddffa7b5ae9c/project/module/utils/data_preprocess_and_load/datasets.py#L120C1-L121C1
+        
+        Args:
+            x: (T, X, Y, Z)
+            fill_val: (T,) per-frame background fill value
+            
+        Returns:
+            (T, target, target, target)
+        """
+        T, X, Y, Z = x.shape
         tgt = self.spatial_target
-
-        def crop_slice(n: int):
-            if n <= tgt:
-                return slice(0, n)
-            s = (n - tgt) // 2
-            return slice(s, s + tgt)
-
-        xs = crop_slice(X)
-        ys = crop_slice(Y)
-        zs = crop_slice(Z)
-
-        xc = x[:, :, xs, ys, zs]
-        _, _, Xc, Yc, Zc = xc.shape
-
-        px = tgt - Xc
-        py = tgt - Yc
-        pz = tgt - Zc
-
-        px_l, px_r = px // 2, px - (px // 2)
-        py_l, py_r = py // 2, py - (py // 2)
-        pz_l, pz_r = pz // 2, pz - (pz // 2)
-
-        # create output filled with per-sample fill
-        out = torch.empty((B, T, tgt, tgt, tgt), device=x.device, dtype=x.dtype)
-        out[:] = fill_val.view(B, 1, 1, 1, 1)
-
-        out[:, :, px_l:px_l+Xc, py_l:py_l+Yc, pz_l:pz_l+Zc] = xc
-        return out
-
-    def center_crop_pad_to(
-        x: Tensor,
-        fill_val: Tensor,
-        tgt: int = 96,
-        prefer_left_extra: bool = True,
-    ) -> Tensor:
-        """
-        Dynamic crop/pad to (tgt,tgt,tgt) for x: (B,T,X,Y,Z).
-
-        If prefer_left_extra=True:
-            - odd padding puts the extra voxel on the LEFT  (e.g., 5 -> 3L/2R)
-            - odd cropping removes the extra voxel on the LEFT (e.g., 13 -> 7L/6R)
-            This is the behavior of the original code, see: https://github.com/Transconnectome/SwiFT/blob/0b07cb156d77a7de33078c8f6fe3ddffa7b5ae9c/project/module/utils/data_preprocess_and_load/datasets.py#L120C1-L121C1
         
-        fill_val: (B,) per-sample background fill value used for padded regions.
-        """
-        assert x.ndim == 5, f"expected (B,T,X,Y,Z), got {x.shape}"
-        B, T, X, Y, Z = x.shape
-        
-        def split_odd(total: int):
-            if prefer_left_extra:
-                return (total + 1) // 2, total // 2
-            return total // 2, (total + 1) // 2
-        
-        # Crop each dimension
-        def get_slice(n: int):
+        def get_crop_slice(n: int) -> slice:
             if n <= tgt:
                 return slice(None)
-            crop_l, crop_r = split_odd(n - tgt)
-            return slice(crop_l, n - crop_r)
+            start = (n - tgt) // 2
+            return slice(start, start + tgt)
         
-        xc = x[:, :, get_slice(X), get_slice(Y), get_slice(Z)]
-        _, _, Xc, Yc, Zc = xc.shape
+        x_cropped = x[:, get_crop_slice(X), get_crop_slice(Y), get_crop_slice(Z)]
+        _, Xc, Yc, Zc = x_cropped.shape
         
-        pad_z = split_odd(max(0, tgt - Zc))
-        pad_y = split_odd(max(0, tgt - Yc))
-        pad_x = split_odd(max(0, tgt - Xc))
+        pad_x = max(0, tgt - Xc)
+        pad_y = max(0, tgt - Yc)
+        pad_z = max(0, tgt - Zc)
         
-        padding = (*pad_z, *pad_y, *pad_x)
+        pad_x_left, pad_x_right = (pad_x + 1) // 2, pad_x // 2
+        pad_y_left, pad_y_right = (pad_y + 1) // 2, pad_y // 2
+        pad_z_left, pad_z_right = (pad_z + 1) // 2, pad_z // 2
         
-        out = xc.clone()
-        for b in range(B):
-            out[b] = F.pad(xc[b], padding, value=fill_val[b].item())
+        out = torch.empty((T, tgt, tgt, tgt), device=x.device, dtype=x.dtype)
+        padding = (pad_z_left, pad_z_right, pad_y_left, pad_y_right, pad_x_left, pad_x_right)
+        
+        for t in range(T):
+            out[t] = F.pad(x_cropped[t], padding, value=fill_val[t].item())
         
         return out
 
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]:
-        bold = sample['bold']
 
+        """
+        Transform bold volumes to model input format.
+        
+        sample dicts requires keys: 
+            - bold: (T,V) normalized bold signal,
+            - mean: (1,V) mean of bold signal,
+            - std: (1,V) standard deviation of bold signal
+
+        sample dict is modified in place:
+            - bold: (C, H, W, D, T) 
+
+        """
         # unnormalize
-        bold = bold * sample['std'] + sample['mean']
+        bold = sample['bold'] * sample['std'] + sample['mean']
 
-        if bold.ndim == 2:
-            bold = bold.unsqueeze(0)  # (1,T,V) create batch dimension
-
-        B, T, V = bold.shape
-        mask = self.mask.to(device=bold.device)
+        # unflatten
+        T, V = bold.shape
         Z, Y, X = self.mask_shape
-        vol = torch.zeros((B, T, Z, Y, X), dtype=bold.dtype, device=bold.device)
-        vol[:, :, mask] = bold  # mask flattens (Z,Y,X) -> V positions
+        mask = self.mask.to(device=bold.device)
+        volume = torch.zeros((T, Z, Y, X), dtype=bold.dtype, device=bold.device)
+        volume[:, mask] = bold  # Assign flattened voxels to mask positions
+        volume = rearrange(volume, 't z y x -> t x y z')
 
-        x = vol.permute(0, 1, 4, 3, 2)  # (B,T,X,Y,Z)
+        # select frames
+        volume = self._temporal_select(volume) # (T', X, Y, Z)
 
-        x, fill_val = self._global_scale_and_fill_bg(x)
-        x = self._center_crop_pad_to(x, fill_val)
+        # scale and fill
+        volume, fill_values = self._scale_and_fill_volume(volume)  # (T', X, Y, Z)
 
-        x = self._temporal_select(x)  # (B,T',96,96,96)
+        # center crop or pad
+        volume = self._center_crop_or_pad(volume, fill_values)
 
-        x = x.permute(0, 2, 3, 4, 1).unsqueeze(1) # model expects a channel dimension (B, C, H, W, D, T)
-        sample["bold"] = x[0] # remove batch dimension
+        # rearrange to (C, H, W, D, T)
+        volume = rearrange(volume, 't x y z -> 1 x y z t')
+
+        sample['bold'] = volume
         return sample
-        
-        # # bold is (T, V) or (B, T, V) but here likely (T, V) as it is a transform on sample
-        
-        # # Reconstruct volume (T, Z, Y, X)
-        # # Note: nisc.read_nifti_data outputs (T, Z, Y, X) but we only have T and V.
-        # # We place V back into (Z, Y, X).
-        
-        # T = bold.shape[0]
-        
-        # # Initialize volume
-        # vol = torch.zeros((T, *self.mask_shape), dtype=bold.dtype, device=bold.device)
-        
-        # # Fill volume
-        # # mask is (Z, Y, X). Broadcasting over T works for assignment.
-        # vol[:, self.mask] = bold
-        
-        # # Swift expects (B, C, H, W, D, T)
-        # # vol is (T, Z, Y, X)
-        # # Permute to (X, Y, Z, T) -> (C, X, Y, Z, T)
-        # # Assuming H=X, W=Y, D=Z or similar standard
-        
-        # vol = vol.permute(3, 2, 1, 0) # (X, Y, Z, T)
-        # vol = vol.unsqueeze(0) # (1, X, Y, Z, T) => C=1
-        
-        # sample['bold'] = vol
-        # return sample
 
 
 @register_model
