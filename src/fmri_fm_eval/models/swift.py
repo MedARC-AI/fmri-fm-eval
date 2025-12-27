@@ -4,55 +4,9 @@ SwiFT: Swin 4D fMRI Transformer
 
 """
 
-
-"""Template for a new model.
-
-Instructions:
-
-1. Create an `fmri_fm_eval` package inside *your* repo
-
-    ```
-    mkdir -p my_repo/src/fmri_fm_eval/models
-    ```
-
-    This will make your model discoverable to the eval suite as a [namespace package
-plugin](https://packaging.python.org/en/latest/guides/creating-and-discovering-plugins/#using-namespace-packages).
-
-2. Copy the `template.py` into the new package
-
-    ```
-    cp template.py my_repo/src/fmri_fm_eval/models/my_model.py
-    ```
-
-3. Implement the `ModelWrapper` and optionally `ModelTransform` for the new model.
-
-    You can freely import from your official model code. You do not need to
-    copy/re-implement the entire model.
-
-4. Run the test to validate the model
-
-    ```
-    python -m fmri_fm_eval.models.test_models my_model
-    ```
-
-    If you want to debug your implementation, you can copy the provided `test_models.py`
-    into your source tree and run locally.
-
-5. (Optional) open a PR to add your model to the upstream repo
-
-    Your PR should only include the single model wrapper file
-
-    ```
-    fmri-fm-eval/src/fmri_fm_eval/models/my_model.py
-    ```
-
-    Any extra dependencies needed should be added as optional dependencies for
-    your specific model in the `pyproject.toml`
-    (https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#dependencies-and-requirements).
-"""
-
 import torch.nn as nn
 from torch import Tensor
+import torch.nn.functional as F 
 
 from fmri_fm_eval.models.base import Embeddings
 from fmri_fm_eval.models.registry import register_model
@@ -62,11 +16,12 @@ import torch
 from fmri_fm_eval import nisc
 from einops import rearrange
 
+
 try:
     from swiftfmri.pl_classifier import LitClassifier
 except ImportError as exc:
     raise ImportError(
-        "swiftfmri not installed. Please install the optional swiftfmri extra."
+        "swiftfmri not installed. Please install the optional swiftfmri extra with `uv sync --extra swift`"
     ) from exc
 
 
@@ -157,8 +112,6 @@ class SwiftWrapper(nn.Module):
 
     def forward(self, batch: dict[str, Tensor]) -> Embeddings:
         x = batch['bold']
-        print("batch.keys(): ", batch.keys())
-        print("batch bold shape: ", batch['bold'].shape)
         if x.ndim != 6:
             raise ValueError(
                 f"Expected batch['x'] to be 6D (B, C, H, W, D, T), got shape {tuple(x.shape)}"
@@ -167,7 +120,6 @@ class SwiftWrapper(nn.Module):
         feats = self.backbone(x) # feats have shape (B, channels, H, W, D, T) (B, 288, 2, 2, 2, 20)
         feats = rearrange(feats, 'b c x y z t -> b (x y z t) c') # convert to (B, patches, channels)
 
-        print("feats shape: ", feats.shape)
         return Embeddings(
             cls_embeds=None,
             reg_embeds=None,
