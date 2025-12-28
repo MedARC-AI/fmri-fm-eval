@@ -150,6 +150,8 @@ def main(args: DictConfig):
 
     # we use a fixed epoch length determined by steps_per_epoch so that the training
     # schedule is consistent across datasets with varying numbers of samples.
+    if not args.steps_per_epoch:
+        args.steps_per_epoch = len(train_loader) // args.accum_iter
     total_steps = args.epochs * args.steps_per_epoch
     warmup_steps = args.warmup_epochs * args.steps_per_epoch
     lr_schedule = make_lr_schedule(args.lr, total_steps, warmup_steps)
