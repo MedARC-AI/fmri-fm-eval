@@ -10,8 +10,6 @@ All models use 200 timepoints with sliding window evaluation.
 """
 
 import importlib.resources
-from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -41,6 +39,8 @@ BRAINLM_VARIANTS = {
     "650m": "vitmae_650M",
 }
 
+DEFAULT_MAX_VAL_TO_SCALE = 5.6430855
+
 
 class BrainLMTransform:
     """
@@ -63,12 +63,11 @@ class BrainLMTransform:
     def __init__(
         self,
         num_timepoints: int = 200,
-        max_val_to_scale: float = 5.6430855,  # Default for RobustScaler normalization
+        max_val_to_scale: float = DEFAULT_MAX_VAL_TO_SCALE,  # Default for RobustScaler normalization
         repeat_channels: bool = True,
     ):
         """
         Args:
-            coords_dataset_path: Path to brain region coordinates dataset for voxel reordering.
             num_timepoints: Number of timepoints per window (BrainLM uses 200).
             max_val_to_scale: Max value for scaling - DATASET-SPECIFIC!
                               Default 5.6430855 is for RobustScaler normalized data.
@@ -80,8 +79,11 @@ class BrainLMTransform:
 
         # Load voxel reordering indices from coords dataset
         coords_ds = load_a424_coords()  # (424, 4), cols [Index, X, Y, Z]
+        # TODO: reference in original brainlm code for this reordering?
+        # Is this the correct order for both model variants?
         self.reorder_indices = np.argsort(coords_ds["Y"])
         self.xyz_vectors = torch.from_numpy(coords_ds.loc[:, ["X", "Y", "Z"]].values)
+        self.xyz_vectors = self.xyz_vectors[self.reorder_indices]
 
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor] | None:
         bold = sample["bold"]  # (T, D) - z-score normalized data
@@ -119,11 +121,12 @@ class BrainLMTransform:
         bold = bold / self.max_val_to_scale
 
         # Expand channels dimension [W, C, D, T]
+        bold = bold.unsqueeze(1)
         if self.repeat_channels:
-            bold = bold.unsqueeze(1).repeat(1, 3, 1, 1)
+            bold = bold.repeat(1, 3, 1, 1)
 
-        sample["bold"] = bold  # [W, C, D, T] or [W, D, T]
-        sample["xyz"] = self.xyz_vectors  # [D, 3]
+        sample["bold"] = bold  # [W, C, D, T]
+        sample["xyz"] = self.xyz_vectors.repeat(num_windows, 1, 1)  # [W, D, 3]
 
         return sample
 
@@ -159,12 +162,12 @@ class BrainLMModelWrapper(nn.Module):
     Wrapper for BrainLM encoder model.
 
     Takes input batch and returns embeddings in the format expected by fmri-fm-eval:
-    - cls_embeds: (B, embed_dim) - CLS token embeddings
+    - cls_embeds: (B, 1, embed_dim) - CLS token embeddings
     - reg_embeds: None (no register tokens)
     - patch_embeds: (B, num_patches, embed_dim) - patch token embeddings
 
-    Input shape: (B, 3, 424, 200) where B = num_windows * batch_size
-    Model pads to: (B, 3, 432, 432)
+    Input shape: (B, W, 3, 424, 200) where W = num_windows
+    Model pads to: (*, 3, 432, 432)
     embed_dim: 768 (111M), 1280 (650M), 512 (13M)
     """
 
@@ -178,32 +181,30 @@ class BrainLMModelWrapper(nn.Module):
         super().__init__()
         self.backbone = backbone
         self.model_type = model_type
+        # Set mask_ratio to 0 to disable masking during inference
+        # TODO: check that setting this like this works?
+        self.backbone.vit.embeddings.config.mask_ratio = 0.0
 
     def forward(self, batch: dict[str, Tensor]) -> Embeddings:
         pixel_values = batch["bold"]
 
+        # Flatten windows together
+        B, W, C, D, T = pixel_values.shape
+        pixel_values = pixel_values.flatten(0, 1)
+
         if self.model_type == "vitmae":
-            pixel_values = pixel_values.squeeze(0)
-            return self._forward_vitmae(pixel_values)
+            sequence_output = self._forward_vitmae(pixel_values)
+        else:
+            xyz_vectors = batch["xyz"].flatten(0, 1)
+            sequence_output = self._forward_brainlm(pixel_values, xyz_vectors)
 
-        return self._forward_brainlm(batch)
-
-    def _forward_vitmae(self, pixel_values: Tensor) -> Embeddings:
-        """Forward pass for ViTMAE models (111M, 650M)."""
-        # Set mask_ratio to 0 to disable masking during inference
-        self.backbone.vit.embeddings.config.mask_ratio = 0.0
-
-        with torch.set_grad_enabled(False):
-            outputs = self.backbone(
-                pixel_values,
-                output_hidden_states=True,
-                return_dict=True,
-            )
-            sequence_output = outputs.hidden_states[-1]
+        # Unflatten windows
+        _, N, C = sequence_output.shape
+        sequence_output = sequence_output.reshape(B, W, N, C)
 
         # Split CLS and patch tokens
-        cls_embeds = sequence_output[:, 0, :]  # (B, embed_dim)
-        patch_embeds = sequence_output[:, 1:, :]  # (B, num_patches, embed_dim)
+        cls_embeds = sequence_output[:, :, :1, :].mean(dim=1)  # (B, 1, C)
+        patch_embeds = sequence_output[:, :, 1:, :].flatten(1, 2)  # (B, W * N, C)
 
         return Embeddings(
             cls_embeds=cls_embeds,
@@ -211,55 +212,38 @@ class BrainLMModelWrapper(nn.Module):
             patch_embeds=patch_embeds,
         )
 
-    def _forward_brainlm(self, batch: dict[str, Tensor]) -> Embeddings:
+    def _forward_vitmae(self, pixel_values: torch.Tensor) -> torch.Tensor:
+        outputs = self.backbone(
+            pixel_values,
+            output_hidden_states=True,
+            return_dict=True,
+        )
+        return outputs.hidden_states[-1]
+
+    def _forward_brainlm(
+        self, pixel_values: torch.Tensor, xyz_vectors: torch.Tensor
+    ) -> torch.Tensor:
         """Forward pass for legacy BrainLM model (13M)."""
-        # Set mask_ratio to 0 to disable masking during inference
-        self.backbone.vit.embeddings.config.mask_ratio = 0.0
+        B, C, D, T = pixel_values.shape
+        signal_vectors = pixel_values[:, 0, :, :]
 
-        bold = batch["bold"]
-        signal_vectors = bold[:, 0, :, :]
-        batch_size = signal_vectors.shape[0]
-
-        xyz_vectors = batch.get("xyz")
-        if xyz_vectors is None:
-            raise ValueError("Missing xyz vectors for BrainLM 13M model input.")
-
-        if xyz_vectors.ndim == 2:
-            xyz_vectors = xyz_vectors.unsqueeze(0).expand(batch_size, -1, -1)
-        elif xyz_vectors.shape[0] != batch_size:
-            raise ValueError("xyz batch size does not match signal batch size.")
-
-        with torch.set_grad_enabled(False):
-            encoder_outputs = self.backbone.vit(
-                signal_vectors=signal_vectors,
-                xyz_vectors=xyz_vectors,
-                output_hidden_states=True,
-                return_dict=True,
-            )
-            sequence_output = encoder_outputs.last_hidden_state
-            # sequence_output: (B, 1 + num_patches, embed_dim)
-
-        # Split CLS and patch tokens
-        cls_embeds = sequence_output[:, 0, :]  # (B, embed_dim)
-        patch_embeds = sequence_output[:, 1:, :]  # (B, num_patches, embed_dim)
-
-        return Embeddings(
-            cls_embeds=cls_embeds,
-            reg_embeds=None,
-            patch_embeds=patch_embeds,
+        outputs = self.backbone.vit(
+            signal_vectors=signal_vectors,
+            xyz_vectors=xyz_vectors,
+            output_hidden_states=True,
+            return_dict=True,
         )
+        return outputs.last_hidden_state
 
 
 def load_brainlm_from_hf(
     variant: str = "111m",
-    cache_dir: Optional[str | Path] = None,
 ) -> tuple[nn.Module, str]:
     """
     Load BrainLM model directly from HuggingFace Hub.
 
     Args:
         variant: Model variant - one of "13m", "111m", "650m"
-        cache_dir: Optional cache directory for downloaded files
 
     Returns:
         Tuple of (loaded model, model_type) where model_type is "vitmae" or "brainlm"
@@ -273,19 +257,11 @@ def load_brainlm_from_hf(
 
     if variant in ["111m", "650m"]:
         # ViTMAE models (111M, 650M)
-        model = ViTMAEForPreTraining.from_pretrained(
-            BRAINLM_REPO,
-            subfolder=subfolder,
-            cache_dir=cache_dir,
-        )
+        model = ViTMAEForPreTraining.from_pretrained(BRAINLM_REPO, subfolder=subfolder)
         model_type = "vitmae"
     else:
         # Legacy BrainLM model (13M)
-        model = BrainLMForPretraining.from_pretrained(
-            BRAINLM_REPO,
-            subfolder=subfolder,
-            cache_dir=cache_dir,
-        )
+        model = BrainLMForPretraining.from_pretrained(BRAINLM_REPO, subfolder=subfolder)
         model_type = "brainlm"
 
     model.config.train_mode = "auto_encode"
@@ -294,26 +270,22 @@ def load_brainlm_from_hf(
 
 
 def create_brainlm_model(
-    coords_dataset_path: str,
     variant: str = "111m",
-    max_val_to_scale: float = 5.6430855,
-    cache_dir: Optional[str | Path] = None,
+    max_val_to_scale: float = DEFAULT_MAX_VAL_TO_SCALE,
 ) -> tuple[BrainLMTransform, BrainLMModelWrapper]:
     """
     Create BrainLM model and transform (loads from HuggingFace Hub: vandijklab/brainlm).
 
     Args:
-        coords_dataset_path: Path to brain region coordinates dataset.
         variant: Model variant - one of "13m", "111m", "650m"
         max_val_to_scale: Max value for scaling - dataset-specific!
                           Default 5.6430855 is for RobustScaler normalized data.
-        cache_dir: Optional cache directory for HuggingFace downloads.
 
     Returns:
         Tuple of (transform, model wrapper)
     """
     # Load from HuggingFace Hub
-    backbone, model_type = load_brainlm_from_hf(variant, cache_dir)
+    backbone, model_type = load_brainlm_from_hf(variant)
 
     # Create wrapper
     model = BrainLMModelWrapper(backbone, model_type=model_type)
@@ -322,7 +294,6 @@ def create_brainlm_model(
     transform = BrainLMTransform(
         num_timepoints=200,
         max_val_to_scale=max_val_to_scale,
-        coords_dataset_path=coords_dataset_path,
         repeat_channels=variant in ["111m", "650m"],
     )
 
@@ -331,29 +302,23 @@ def create_brainlm_model(
 
 @register_model
 def brainlm_13m(
-    coords_dataset_path: str,
-    max_val_to_scale: float = 5.6430855,
-    cache_dir: Optional[str | Path] = None,
+    max_val_to_scale: float = DEFAULT_MAX_VAL_TO_SCALE,
 ) -> tuple[BrainLMTransform, BrainLMModelWrapper]:
     """Legacy BrainLM 13M parameter model (from HuggingFace: vandijklab/brainlm)."""
-    return create_brainlm_model(coords_dataset_path, "13m", max_val_to_scale, cache_dir)
+    return create_brainlm_model("13m", max_val_to_scale)
 
 
 @register_model
 def brainlm_vitmae_111m(
-    coords_dataset_path: str,
-    max_val_to_scale: float = 5.6430855,
-    cache_dir: Optional[str | Path] = None,
+    max_val_to_scale: float = DEFAULT_MAX_VAL_TO_SCALE,
 ) -> tuple[BrainLMTransform, BrainLMModelWrapper]:
     """BrainLM ViT-MAE 111M parameter model (from HuggingFace: vandijklab/brainlm)."""
-    return create_brainlm_model(coords_dataset_path, "111m", max_val_to_scale, cache_dir)
+    return create_brainlm_model("111m", max_val_to_scale)
 
 
 @register_model
 def brainlm_vitmae_650m(
-    coords_dataset_path: str,
-    max_val_to_scale: float = 5.6430855,
-    cache_dir: Optional[str | Path] = None,
+    max_val_to_scale: float = DEFAULT_MAX_VAL_TO_SCALE,
 ) -> tuple[BrainLMTransform, BrainLMModelWrapper]:
     """BrainLM ViT-MAE 650M parameter model (from HuggingFace: vandijklab/brainlm)."""
-    return create_brainlm_model(coords_dataset_path, "650m", max_val_to_scale, cache_dir)
+    return create_brainlm_model("650m", max_val_to_scale)
