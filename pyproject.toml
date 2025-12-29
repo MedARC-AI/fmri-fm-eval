@@ -29,6 +29,7 @@ dependencies = [
     "s3fs",
     "scikit-learn",
     "tabulate",
+    "templateflow",
     "torch",
     "tqdm",
     "wandb",
