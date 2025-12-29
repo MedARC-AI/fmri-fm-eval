@@ -349,6 +349,8 @@ def create_brainlm_model(
 @register_model
 def brainlm_13m(**kwargs) -> tuple[BrainLMTransform, BrainLMModelWrapper]:
     """Legacy BrainLM 13M parameter model (from HuggingFace: vandijklab/brainlm)."""
+    # Legacy model doesn't use max value scaling
+    kwargs = {"max_val_to_scale": 1.0, **kwargs}
     return create_brainlm_model("13m", **kwargs)
 
 
