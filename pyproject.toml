@@ -25,10 +25,32 @@ dependencies = [
     "pre-commit",
     "pycortex",
     "pytest",
+    "python-dotenv",
+    "s3fs",
     "scikit-learn",
+    "tabulate",
+    "templateflow",
+    "torch",
     "tqdm",
+    "wandb",
     "webdataset",
     "yaspy",
+]
+
+[project.optional-dependencies]
+
+brain-jepa = [
+    "gdown",
+    "brain-jepa",
+]
+
+swift = [
+    "gdown",
+    "swiftfmri",
+]
+
+brainlm = [
+    "brainlm",
 ]
 
 [tool.setuptools_scm]
@@ -37,6 +59,9 @@ version_file = "src/fmri_fm_eval/_version.py"
 [tool.uv.sources]
 nsdcode = { git = "https://github.com/cvnlab/nsdcode.git", rev = "bfd36a503cc90a3eb3ebfd69b269403f7e186924" }
 yaspy = { git = "https://github.com/childmindresearch/yaspy.git" }
+brain-jepa = { git = "https://github.com/MedARC-AI/Brain-JEPA.git", rev = "c43f8a647b948000ec1a92c4ea6f5efb4efc27f1" }
+swiftfmri = { git = "https://github.com/MedARC-AI/SwiFT.git", rev = "934e27a892921756109feb577851615e4e8faeb6" }
+brainlm = { git = "https://github.com/MedARC-AI/BrainLM.git", rev = "e287e0fa0f2dda61b448614d92e9041cb38fa128" }
 
 [tool.ruff]
 line-length = 100

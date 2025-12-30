@@ -1,47 +1,42 @@
 import json
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 import datasets as hfds
 import numpy as np
 import fsspec
-from torch.utils.data import Dataset
+import torch
 
 
-class ArrowDataset(Dataset):
+class Dataset:
     """
-    HF Arrow dataset.
-
-    Args:
-        url: local or remote path for dataset.
-
-    Notes:
-        Supports remote urls such as
-
-        ```
-        s3://medarc/fmri-fm-eval/processed/hcpya-rest1lr.schaefer400_tians3.arrow/train
-        hf://datasets/clane9/fmri-fm-eval/hcpya-rest1lr.schaefer400_tians3.arrow/train
-        ```
+    Abstract dataset.
     """
+
+    __num_classes__: int
+    """Number of target classes, or target dimension for regression."""
+
+    __task__: Literal["classification", "regression"]
+    """Type of prediction task."""
+
+
+class HFDataset(torch.utils.data.Dataset):
+    __num_classes__: int
+    __task__: str
 
     def __init__(
         self,
-        url: str,
+        dataset: hfds.Dataset,
         target_map_path: str | Path | None = None,
         target_key: str | None = None,
         transform: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
-        keep_in_memory: bool = False,
-        storage_options: dict[str, Any] | None = None,
     ):
-        self.url = url
-        self.target_key = target_key
+        self.dataset = dataset
         self.target_map_path = target_map_path
-        self.keep_in_memory = keep_in_memory
+        self.target_key = target_key
+        self.transform = transform
 
-        dataset = hfds.load_from_disk(
-            url, keep_in_memory=keep_in_memory, storage_options=storage_options
-        )
-        dataset.set_format("torch")
+        self.dataset.set_format("torch")
 
         if target_map_path is not None:
             with fsspec.open(target_map_path, "r") as f:
@@ -54,10 +49,8 @@ class ArrowDataset(Dataset):
             target_map = None
             indices = np.arange(len(dataset))
 
-        self.dataset = dataset
         self.target_map = target_map
         self.indices = indices
-        self.transform = transform
 
     def __getitem__(self, index: int):
         sample = self.dataset[self.indices[index]]
@@ -69,8 +62,17 @@ class ArrowDataset(Dataset):
             sample = self.transform(sample)
         return sample
 
+    def set_transform(self, transform: Callable[[dict[str, Any]], dict[str, Any]]) -> None:
+        self.transform = transform
+
     def __len__(self):
         return len(self.indices)
 
-    def set_transform(self, transform: Callable[[dict[str, Any]], dict[str, Any]]) -> None:
-        self.transform = transform
+    def __repr__(self):
+        s = (
+            f"    dataset={self.dataset},\n"
+            f"    target_map_path='{self.target_map_path}',\n"
+            f"    target_key='{self.target_key}'"
+        )
+        s = f"HFDataset(\n{s}\n)"
+        return s

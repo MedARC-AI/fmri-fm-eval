@@ -1,14 +1,12 @@
-import pytest
+import argparse
 
+import pytest
 import torch
 from torch import Tensor
 from torch.utils.data import default_collate
 
-from fmri_fm_eval.models.registry import list_models, create_model, import_model_plugins
+from fmri_fm_eval.models.registry import list_models, create_model
 import fmri_fm_eval.readers as readers
-
-# Import all available plugins to implicitly register models.
-import_model_plugins()
 
 
 def get_dummy_sample(space: str, n_samples: int) -> dict[str, Tensor]:
@@ -28,11 +26,15 @@ def test_model(name: str, n_samples: int):
     transform, model = create_model(name)
 
     batch_size = 2
-    batch = []
-    for _ in range(batch_size):
-        sample = get_dummy_sample(model.__space__, n_samples)
-        sample = transform(sample)
-        batch.append(sample)
+    batch = [get_dummy_sample(model.__space__, n_samples) for _ in range(batch_size)]
+
+    if transform is not None:
+        # precompute global stats on dummy batch if needed
+        if hasattr(transform, "fit"):
+            transform.fit(batch)
+        # apply transform to each sample
+        batch = [transform(sample) for sample in batch]
+
     batch = default_collate(batch)
 
     cls_embeds, reg_embeds, patch_embeds = model(batch)
@@ -47,3 +49,22 @@ def test_model(name: str, n_samples: int):
     if patch_embeds is not None:
         assert patch_embeds.ndim == 3
         assert patch_embeds.shape[0] == batch_size
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "model",
+        type=str,
+        nargs="*",
+        help=f"model name or pattern (models: {', '.join(list_models())})",
+    )
+    args = parser.parse_args()
+
+    if args.model:
+        filter_args = ["-k", " or ".join(args.model)]
+    else:
+        filter_args = []
+    # ignore annoying error due to repeated import of pytest plugins
+    opts = ["-W", "ignore::pytest.PytestAssertRewriteWarning"]
+    pytest.main(filter_args + opts + [__file__])

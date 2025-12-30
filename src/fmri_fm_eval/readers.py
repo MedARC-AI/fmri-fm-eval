@@ -1,6 +1,7 @@
 from typing import Protocol
 
 import numpy as np
+from templateflow import api as tflow
 
 from . import nisc
 
@@ -70,8 +71,22 @@ def flat_reader() -> Reader:
     return fn
 
 
-def mni_reader() -> Reader:
+def mni_cortex_reader() -> Reader:
     roi_path = nisc.fetch_schaefer(400, space="mni")
+    mask = nisc.read_nifti_data(roi_path) > 0
+
+    def fn(path: str):
+        series = nisc.read_nifti_data(path)
+        series = series[:, mask]
+        return series
+
+    return fn
+
+
+def mni_reader() -> Reader:
+    roi_path = tflow.get(
+        "MNI152NLin6Asym", desc="brain", resolution=2, suffix="mask", extension="nii.gz"
+    )
     mask = nisc.read_nifti_data(roi_path) > 0
 
     def fn(path: str):
@@ -90,6 +105,7 @@ READER_DICT = {
     "a424": a424_reader,
     "flat": flat_reader,
     "mni": mni_reader,
+    "mni_cortex": mni_cortex_reader,
 }
 
 
@@ -100,5 +116,6 @@ DATA_DIMS = {
     "schaefer400_tians3": 450,
     "a424": 424,
     "flat": 77763,
-    "mni": 132032,
+    "mni": 228483,
+    "mni_cortex": 132032,
 }

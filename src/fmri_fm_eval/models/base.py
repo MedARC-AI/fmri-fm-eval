@@ -1,14 +1,18 @@
-from typing import Callable, NamedTuple
+from typing import Callable, Iterable, NamedTuple
 
 import torch.nn as nn
 from torch import Tensor
-from jaxtyping import Float
 
 
 class Embeddings(NamedTuple):
-    cls_embeds: Float[Tensor, "B 1 D"] | None
-    reg_embeds: Float[Tensor, "B R D"] | None
-    patch_embeds: Float[Tensor, "B L D"] | None
+    cls_embeds: Tensor | None
+    """cls embeddings [B 1 D]"""
+
+    reg_embeds: Tensor | None
+    """register embeddings [B R D]"""
+
+    patch_embeds: Tensor | None
+    """patch embeddings [B L D]"""
 
 
 class ModelWrapper(nn.Module):
@@ -30,12 +34,14 @@ class ModelTransform:
 
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]: ...
 
+    def fit(self, train_dataset: Iterable[dict[str, Tensor]]) -> None:
+        """
+        Precompute global transform parameters (e.g. mean, stdev) on training dataset.
 
-def default_transform(sample: dict[str, Tensor]) -> dict[str, Tensor]:
-    """Default No-op transform."""
-    return sample
+        Optional, doesn't have to be defined.
+        """
 
 
-ModelTransformPair = tuple[ModelTransform, ModelWrapper]
+ModelTransformPair = tuple[ModelTransform | None, ModelWrapper]
 
 ModelFn = Callable[..., ModelWrapper | ModelTransformPair]

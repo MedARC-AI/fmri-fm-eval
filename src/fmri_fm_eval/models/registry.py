@@ -4,7 +4,7 @@ import pkgutil
 from typing import Callable
 
 import fmri_fm_eval.models
-from fmri_fm_eval.models.base import ModelTransformPair, ModelFn, default_transform
+from fmri_fm_eval.models.base import ModelTransformPair, ModelFn
 
 _logger = logging.getLogger(__package__)
 
@@ -40,11 +40,9 @@ def create_model(name: str, **kwargs) -> ModelTransformPair:
     model_pair = _MODEL_REGISTRY[name](**kwargs)
 
     if not isinstance(model_pair, tuple):
-        model = model_pair
-        transform = default_transform
+        transform, model = None, model_pair
     else:
         transform, model = model_pair
-        transform = default_transform if transform is None else transform
     return transform, model
 
 
@@ -61,5 +59,9 @@ def import_model_plugins():
             try:
                 plugins[name] = importlib.import_module(f"fmri_fm_eval.models.{name}")
             except Exception as exc:
-                _logger.warning(f"Import model plugin {name} failed: {exc}", exc_info=True)
+                _logger.warning(f"Import model plugin {name} failed: {exc}")
     return plugins
+
+
+# import all discovered plugins to register
+_MODEL_PLUGINS = import_model_plugins()
