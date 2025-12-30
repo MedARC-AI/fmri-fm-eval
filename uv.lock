@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'linux'",
@@ -441,6 +441,27 @@ dependencies = [
     { name = "torch" },
     { name = "torchaudio" },
     { name = "torchvision" },
+    { name = "tqdm" },
+]
+
+[[package]]
+name = "brainharmonix"
+version = "0.1.0"
+source = { git = "https://github.com/MedARC-AI/Brain-Harmony.git#c6e41f0d882aa95fc98d55a809a0be52a7c92ee9" }
+dependencies = [
+    { name = "absl-py" },
+    { name = "accelerate" },
+    { name = "einops" },
+    { name = "matplotlib" },
+    { name = "ml-collections" },
+    { name = "nibabel" },
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "pandas" },
+    { name = "scikit-learn" },
+    { name = "scipy" },
+    { name = "timm" },
+    { name = "torch" },
     { name = "tqdm" },
 ]
 
@@ -1001,6 +1022,10 @@ brain-jepa = [
     { name = "brain-jepa" },
     { name = "gdown" },
 ]
+brainharmonix = [
+    { name = "brainharmonix" },
+    { name = "gdown" },
+]
 brainlm = [
     { name = "brainlm" },
 ]
@@ -1012,11 +1037,13 @@ swift = [
 [package.metadata]
 requires-dist = [
     { name = "brain-jepa", marker = "extra == 'brain-jepa'", git = "https://github.com/MedARC-AI/Brain-JEPA.git?rev=c43f8a647b948000ec1a92c4ea6f5efb4efc27f1" },
+    { name = "brainharmonix", marker = "extra == 'brainharmonix'", git = "https://github.com/MedARC-AI/Brain-Harmony.git" },
     { name = "brainlm", marker = "extra == 'brainlm'", git = "https://github.com/MedARC-AI/BrainLM.git?rev=e287e0fa0f2dda61b448614d92e9041cb38fa128" },
     { name = "cloudpathlib", extras = ["s3"] },
     { name = "datasets" },
     { name = "einops" },
     { name = "gdown", marker = "extra == 'brain-jepa'" },
+    { name = "gdown", marker = "extra == 'brainharmonix'" },
     { name = "gdown", marker = "extra == 'swift'" },
     { name = "huggingface-hub" },
     { name = "ipython" },
@@ -1043,7 +1070,7 @@ requires-dist = [
     { name = "webdataset" },
     { name = "yaspy", git = "https://github.com/childmindresearch/yaspy.git" },
 ]
-provides-extras = ["brain-jepa", "swift", "brainlm"]
+provides-extras = ["brain-jepa", "swift", "brainlm", "brainharmonix"]
 
 [[package]]
 name = "fonttools"
@@ -2427,6 +2454,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d7/02/a7fb8b21d4d55ac93cdcde9d3638da5dd0ebdd3a4fed76c7725e10b81cbe/mistune-3.1.4.tar.gz", hash = "sha256:b5a7f801d389f724ec702840c11d8fc48f2b33519102fc7ee739e8177b672164", size = 94588, upload-time = "2025-08-29T07:20:43.594Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7a/f0/8282d9641415e9e33df173516226b404d367a0fc55e1a60424a152913abc/mistune-3.1.4-py3-none-any.whl", hash = "sha256:93691da911e5d9d2e23bc54472892aff676df27a75274962ff9edc210364266d", size = 53481, upload-time = "2025-08-29T07:20:42.218Z" },
+]
+
+[[package]]
+name = "ml-collections"
+version = "1.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "absl-py" },
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b8/f8/1a9ae6696dbb6bc9c44ddf5c5e84710d77fe9a35a57e8a06722e1836a4a6/ml_collections-1.1.0.tar.gz", hash = "sha256:0ac1ac6511b9f1566863e0bb0afad0c64e906ea278ad3f4d2144a55322671f6f", size = 61356, upload-time = "2025-04-17T08:25:02.247Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ab/8a/18d4ff2c7bd83f30d6924bd4ad97abf418488c3f908dea228d6f0961ad68/ml_collections-1.1.0-py3-none-any.whl", hash = "sha256:23b6fa4772aac1ae745a96044b925a5746145a70734f087eaca6626e92c05cbc", size = 76707, upload-time = "2025-04-17T08:24:59.038Z" },
 ]
 
 [[package]]
@@ -5850,7 +5890,7 @@ wheels = [
 
 [[package]]
 name = "yaspy"
-version = "0.1.dev9+g629df8f"
+version = "0.1.dev9+g629df8fe5"
 source = { git = "https://github.com/childmindresearch/yaspy.git#629df8fe51fc085564b56ef2a2adddec869bfb9a" }
 dependencies = [
     { name = "matplotlib" },
