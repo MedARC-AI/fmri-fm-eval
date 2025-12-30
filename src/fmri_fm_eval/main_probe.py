@@ -45,7 +45,8 @@ def main(args: DictConfig):
     device = torch.device(args.device)
     ut.random_seed(args.seed)
 
-    args.name = f"{args.name_prefix}/{args.model}/{args.representation}/{args.dataset}"
+    if not args.get("name"):
+        args.name = f"{args.name_prefix}/{args.model}/{args.representation}/{args.dataset}"
     args.output_dir = f"{args.output_root}/{args.name}"
     output_dir = Path(args.output_dir)
 
@@ -99,6 +100,10 @@ def main(args: DictConfig):
     for split, ds in dataset_dict.items():
         print(f"{split} (n={len(ds)}):\n{ds}\n")
 
+    if hasattr(transform, "fit"):
+        print("fitting transform on training dataset")
+        transform.fit(dataset_dict["train"])
+
     for split, ds in dataset_dict.items():
         ds.set_transform(transform)
 
@@ -109,6 +114,7 @@ def main(args: DictConfig):
             batch_size=args.batch_size,
             shuffle=split == "train",
             num_workers=args.num_workers,
+            prefetch_factor=args.prefetch_factor,
         )
     # we could also support more splits or different split names, but for now can keep
     # things simple.
@@ -147,6 +153,10 @@ def main(args: DictConfig):
     ut.update_wd(param_groups, args.weight_decay)
     optimizer = torch.optim.AdamW(param_groups)
 
+    # we use a fixed epoch length determined by steps_per_epoch so that the training
+    # schedule is consistent across datasets with varying numbers of samples.
+    if not args.steps_per_epoch:
+        args.steps_per_epoch = len(train_loader) // args.accum_iter
     total_steps = args.epochs * args.steps_per_epoch
     warmup_steps = args.warmup_epochs * args.steps_per_epoch
     lr_schedule = make_lr_schedule(args.lr, total_steps, warmup_steps)

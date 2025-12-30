@@ -59,7 +59,7 @@ def import_model_plugins():
             try:
                 plugins[name] = importlib.import_module(f"fmri_fm_eval.models.{name}")
             except Exception as exc:
-                _logger.warning(f"Import model plugin {name} failed: {exc}", exc_info=True)
+                _logger.warning(f"Import model plugin {name} failed: {exc}")
     return plugins
 
 

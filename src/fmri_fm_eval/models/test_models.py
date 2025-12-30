@@ -26,12 +26,15 @@ def test_model(name: str, n_samples: int):
     transform, model = create_model(name)
 
     batch_size = 2
-    batch = []
-    for _ in range(batch_size):
-        sample = get_dummy_sample(model.__space__, n_samples)
-        if transform is not None:
-            sample = transform(sample)
-        batch.append(sample)
+    batch = [get_dummy_sample(model.__space__, n_samples) for _ in range(batch_size)]
+
+    if transform is not None:
+        # precompute global stats on dummy batch if needed
+        if hasattr(transform, "fit"):
+            transform.fit(batch)
+        # apply transform to each sample
+        batch = [transform(sample) for sample in batch]
+
     batch = default_collate(batch)
 
     cls_embeds, reg_embeds, patch_embeds = model(batch)

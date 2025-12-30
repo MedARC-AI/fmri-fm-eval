@@ -1,4 +1,4 @@
-from typing import Callable, NamedTuple
+from typing import Callable, Iterable, NamedTuple
 
 import torch.nn as nn
 from torch import Tensor
@@ -33,6 +33,13 @@ class ModelTransform:
     """
 
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]: ...
+
+    def fit(self, train_dataset: Iterable[dict[str, Tensor]]) -> None:
+        """
+        Precompute global transform parameters (e.g. mean, stdev) on training dataset.
+
+        Optional, doesn't have to be defined.
+        """
 
 
 ModelTransformPair = tuple[ModelTransform | None, ModelWrapper]

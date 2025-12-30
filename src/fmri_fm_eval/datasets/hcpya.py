@@ -19,7 +19,7 @@ HCPYA_TARGET_MAP_DICT = {
 
 HCPYA_TARGET_NUM_CLASSES = {
     "age": 3,
-    "gender": 3,
+    "gender": 2,
     "flanker": 3,
     "neofacn": 3,
     "pmat24": 3,
