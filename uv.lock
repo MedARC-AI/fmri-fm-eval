@@ -959,7 +959,7 @@ brain-jepa = [
     { name = "brain-jepa" },
     { name = "gdown" },
 ]
-swiftfmri = [
+swift = [
     { name = "gdown" },
     { name = "swiftfmri" },
 ]
@@ -971,7 +971,7 @@ requires-dist = [
     { name = "datasets" },
     { name = "einops" },
     { name = "gdown", marker = "extra == 'brain-jepa'" },
-    { name = "gdown", marker = "extra == 'swiftfmri'" },
+    { name = "gdown", marker = "extra == 'swift'" },
     { name = "huggingface-hub" },
     { name = "ipython" },
     { name = "jupyter" },
@@ -988,7 +988,7 @@ requires-dist = [
     { name = "python-dotenv" },
     { name = "s3fs" },
     { name = "scikit-learn" },
-    { name = "swiftfmri", marker = "extra == 'swiftfmri'", git = "https://github.com/ckadirt/SwiFT.git" },
+    { name = "swiftfmri", marker = "extra == 'swift'", git = "https://github.com/MedARC-AI/SwiFT.git?rev=934e27a892921756109feb577851615e4e8faeb6" },
     { name = "tabulate" },
     { name = "templateflow" },
     { name = "torch" },
@@ -997,7 +997,7 @@ requires-dist = [
     { name = "webdataset" },
     { name = "yaspy", git = "https://github.com/childmindresearch/yaspy.git" },
 ]
-provides-extras = ["brain-jepa", "swiftfmri"]
+provides-extras = ["brain-jepa", "swift"]
 
 [[package]]
 name = "fonttools"
@@ -4685,7 +4685,7 @@ wheels = [
 [[package]]
 name = "swiftfmri"
 version = "0.1.0"
-source = { git = "https://github.com/ckadirt/SwiFT.git#b657344b1d5f2b7fa2719e3523b68c7e8269acc3" }
+source = { git = "https://github.com/MedARC-AI/SwiFT.git?rev=934e27a892921756109feb577851615e4e8faeb6#934e27a892921756109feb577851615e4e8faeb6" }
 dependencies = [
     { name = "einops" },
     { name = "monai" },
@@ -4694,6 +4694,7 @@ dependencies = [
     { name = "nilearn" },
     { name = "numpy" },
     { name = "pandas" },
+    { name = "pytest" },
     { name = "pytorch-lightning" },
     { name = "pyyaml" },
     { name = "scikit-learn" },
