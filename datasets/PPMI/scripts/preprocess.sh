@@ -7,20 +7,34 @@ if [[ -z $1 ]]; then
     exit
 fi
 
+set -a
+source ${HOME}/.env.medarc.r2
+set +a
+
 subidx=$1
 subid=$(sed -n ${subidx}p "${PWD}/metadata/PPMI_BIDS_complete_subs.txt")
 
-datadir="${PWD}/bids_complete"
-outdir="${PWD}/fmriprep"
-logdir="${PWD}/logs/fmriprep"
+# download data for target subject
+datadir=/tmp/PPMI/bids_complete
+aws s3 sync \
+    s3://medarc/fmri-fm-eval/PPMI/bids_complete \
+    ${datadir} \
+    --exclude '*' \
+    --include '*sub-'${subid}'*'
+
+outdir="/tmp/PPMI/fmriprep"
+logdir="/tmp/PPMI/logs"
+
+logname="fmriprep_${subid}.txt"
+logpath="${logdir}/$logname"
+
+mkdir -p $outdir 2>/dev/null
+mkdir -p $logdir 2>/dev/null
 
 fs_license=$(readlink -f ../../resources/license.txt)
 # we need to separately mount a shared fsaverage directory, otherwise there is a race
 # https://github.com/nipreps/fmriprep/issues/3492
 fsavgdir=$(readlink -f ../../resources/fsaverage)
-
-mkdir -p $outdir 2>/dev/null
-mkdir -p $logdir 2>/dev/null
 
 # using first-lex for sub anatomical reference so that we only run freesurfer once per
 # subject. for adni, we used 'sessionwise', but I'm not sure I want to spend the extra
@@ -28,7 +42,6 @@ mkdir -p $logdir 2>/dev/null
 # the sessions are not very far apart.
 docker run --rm \
     -v "${datadir}:/data:ro" \
-    -v "/tmp/datasets/ppmi/bids/:/tmp/datasets/ppmi/bids/:ro" \
     -v "${outdir}:/out" \
     -v "${fsavgdir}:/out/sourcedata/freesurfer/fsaverage:ro" \
     -v "${fs_license}:/opt/freesurfer/license.txt:ro" \
@@ -44,11 +57,12 @@ docker run --rm \
     --omp-nthreads 1 \
     --subject-anatomical-reference first-lex \
     --stop-on-first-crash \
-    2>&1 | tee -a ${logdir}/${subid}.txt
+    2>&1 | tee -a $logpath
 
 aws s3 sync \
     ${outdir} \
     s3://medarc/fmri-fm-eval/PPMI/fmriprep \
     --exclude '*' \
-    --include '*sub-'${subid}'*' \
-    2>&1 | tee -a ${logdir}/${subid}.txt
+    --include '*sub-'${subid}'*'
+
+aws s3 cp $logpath "s3://medarc/fmri-fm-eval/PPMI/fmriprep/logs/${logname}"
