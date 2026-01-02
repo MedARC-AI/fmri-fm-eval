@@ -26,6 +26,7 @@ dependencies = [
     "pycortex",
     "pytest",
     "scikit-learn",
+    "seaborn",
     "tqdm",
     "webdataset",
     "yaspy",
