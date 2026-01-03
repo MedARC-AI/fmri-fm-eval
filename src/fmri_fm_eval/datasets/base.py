@@ -52,11 +52,16 @@ class HFDataset(torch.utils.data.Dataset):
         self.target_map = target_map
         self.indices = indices
 
+        labels, label_counts = np.unique(target_map.values(), return_counts=True)
+        self.labels = labels.tolist()
+        self.label_counts = label_counts.tolist()
+        self.label_to_id = {label: ii for ii, label in enumerate(self.labels)}
+
     def __getitem__(self, index: int):
         sample = self.dataset[self.indices[index]]
 
         if self.target_map:
-            sample["target"] = self.target_map[sample[self.target_key]]
+            sample["target"] = self.label_to_id[self.target_map[sample[self.target_key]]]
 
         if self.transform:
             sample = self.transform(sample)
@@ -72,7 +77,8 @@ class HFDataset(torch.utils.data.Dataset):
         s = (
             f"    dataset={self.dataset},\n"
             f"    target_map_path='{self.target_map_path}',\n"
-            f"    target_key='{self.target_key}'"
+            f"    target_key='{self.target_key},\n'"
+            f"    counts={dict(zip(self.labels, self.label_counts))}"
         )
         s = f"HFDataset(\n{s}\n)"
         return s
