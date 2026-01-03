@@ -689,6 +689,9 @@ def resample_timeseries(
     new_length = int(tr * len(series) / new_tr)
     new_x = new_tr * np.arange(new_length)
 
-    interp = scipy.interpolate.interp1d(x, series, kind=kind, axis=0)
+    if kind == "pchip":
+        interp = scipy.interpolate.PchipInterpolator(x, series, axis=0)
+    else:
+        interp = scipy.interpolate.interp1d(x, series, kind=kind, axis=0)
     series = interp(new_x)
     return series
