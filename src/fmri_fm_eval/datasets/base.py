@@ -45,17 +45,27 @@ class HFDataset(torch.utils.data.Dataset):
             indices = np.array(
                 [ii for ii, key in enumerate(dataset[target_key]) if key in target_map]
             )
+
+            # getting labels first before pruning the target map in case there are 0
+            # examples for some classes in some splits (though that shouldn't happen).
+            labels = np.unique(list(target_map.values())).tolist()
+            label_to_id = {label: ii for ii, label in enumerate(labels)}
+
+            keys = set(dataset[target_key])
+            target_map = {k: v for k, v in target_map.items() if k in keys}
+
+            label_counts = {label: 0 for label in labels}
+            for v in target_map.values():
+                label_counts[v] += 1
         else:
-            target_map = None
+            target_map = labels = label_to_id = label_counts = None
             indices = np.arange(len(dataset))
 
         self.target_map = target_map
         self.indices = indices
-
-        labels, label_counts = np.unique(target_map.values(), return_counts=True)
-        self.labels = labels.tolist()
-        self.label_counts = label_counts.tolist()
-        self.label_to_id = {label: ii for ii, label in enumerate(self.labels)}
+        self.labels = labels
+        self.label_to_id = label_to_id
+        self.label_counts = label_counts
 
     def __getitem__(self, index: int):
         sample = self.dataset[self.indices[index]]
@@ -77,8 +87,8 @@ class HFDataset(torch.utils.data.Dataset):
         s = (
             f"    dataset={self.dataset},\n"
             f"    target_map_path='{self.target_map_path}',\n"
-            f"    target_key='{self.target_key},\n'"
-            f"    counts={dict(zip(self.labels, self.label_counts))}"
+            f"    target_key='{self.target_key}',\n"
+            f"    counts={self.label_counts}"
         )
         s = f"HFDataset(\n{s}\n)"
         return s
