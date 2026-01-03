@@ -28,6 +28,7 @@ dependencies = [
     "python-dotenv",
     "s3fs",
     "scikit-learn",
+    "seaborn",
     "tabulate",
     "templateflow",
     "torch",
