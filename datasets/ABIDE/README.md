@@ -71,3 +71,5 @@ Finally, generate output Arrow datasets for all target standard spaces
 ```bash
 uv run python scripts/make_abide_dataset.py --space schaefer400
 ```
+
+The script standardizes all runs to TR = 2.0s across sites, and selects the first 150 TRs (5 min) for each included run.
