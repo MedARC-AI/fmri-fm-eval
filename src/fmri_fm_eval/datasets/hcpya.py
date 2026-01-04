@@ -17,14 +17,6 @@ HCPYA_TARGET_MAP_DICT = {
     "pmat24": "hcpya_target_map_PMAT24_A_CR.json",
 }
 
-HCPYA_TARGET_NUM_CLASSES = {
-    "age": 3,
-    "gender": 2,
-    "flanker": 3,
-    "neofacn": 3,
-    "pmat24": 3,
-}
-
 
 def _create_hcpya_rest1lr(space: str, target: str, **kwargs):
     target_key = "sub"
@@ -36,14 +28,7 @@ def _create_hcpya_rest1lr(space: str, target: str, **kwargs):
     for split in splits:
         url = f"{HCPYA_ROOT}/hcpya-rest1lr.{space}.arrow/{split}"
         dataset = hfds.load_dataset("arrow", data_files=f"{url}/*.arrow", split="train", **kwargs)
-        dataset = HFDataset(
-            dataset,
-            target_map_path=target_map_path,
-            target_key=target_key,
-        )
-        dataset.__num_classes__ = HCPYA_TARGET_NUM_CLASSES[target]
-        dataset.__task__ = "classification"
-
+        dataset = HFDataset(dataset, target_key=target_key, target_map_path=target_map_path)
         dataset_dict[split] = dataset
 
     return dataset_dict

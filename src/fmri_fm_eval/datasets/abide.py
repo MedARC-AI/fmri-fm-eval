@@ -13,12 +13,6 @@ ABIDE_TARGET_MAP_DICT = {
     "sex": "abide_target_map_sex.json",
 }
 
-ABIDE_TARGET_NUM_CLASSES = {
-    "dx": 2,
-    "age": 3,
-    "sex": 2,
-}
-
 
 def _create_abide(space: str, target: str, **kwargs):
     target_key = "sub"
@@ -30,14 +24,7 @@ def _create_abide(space: str, target: str, **kwargs):
     for split in splits:
         url = f"{ABIDE_ROOT}/abide.{space}.arrow/{split}"
         dataset = hfds.load_dataset("arrow", data_files=f"{url}/*.arrow", split="train", **kwargs)
-        dataset = HFDataset(
-            dataset,
-            target_map_path=target_map_path,
-            target_key=target_key,
-        )
-        dataset.__num_classes__ = ABIDE_TARGET_NUM_CLASSES[target]
-        dataset.__task__ = "classification"
-
+        dataset = HFDataset(dataset, target_key=target_key, target_map_path=target_map_path)
         dataset_dict[split] = dataset
 
     return dataset_dict

@@ -95,8 +95,7 @@ def main(args: DictConfig):
     dataset_dict = create_dataset(
         args.dataset, space=backbone.__space__, **(args.dataset_kwargs or {})
     )
-    args.num_classes = dataset_dict["train"].__num_classes__
-    args.task = dataset_dict["train"].__task__
+    args.num_classes = dataset_dict["train"].num_classes
     for split, ds in dataset_dict.items():
         print(f"{split} (n={len(ds)}):\n{ds}\n")
 
@@ -172,12 +171,7 @@ def main(args: DictConfig):
         best_info = {"loss": float("inf")}
 
     # training loss
-    if args.task == "classification":
-        criterion = nn.CrossEntropyLoss(reduction="none")
-    elif args.task == "regression":
-        criterion = nn.MSELoss(reduction="none")
-    else:
-        raise ValueError(f"Unknown task: {args.task}.")
+    criterion = nn.CrossEntropyLoss(reduction="none")
 
     print(f"start training for {args.epochs} epochs")
     log_wandb = args.wandb and ut.is_main_process()
@@ -220,8 +214,7 @@ def main(args: DictConfig):
             "train/loss_best": train_stats[f"train/loss_{hparam_fmt}"],
             "validation/loss_best": val_stats[f"validation/loss_{hparam_fmt}"],
         }
-        if args.task == "classification":
-            best_stats["validation/acc1_best"] = val_stats[f"validation/acc1_{hparam_fmt}"]
+        best_stats["validation/acc1_best"] = val_stats[f"validation/acc1_{hparam_fmt}"]
 
         if log_wandb:
             wandb.log(best_stats, (epoch + 1) * args.steps_per_epoch)
@@ -291,8 +284,7 @@ def main(args: DictConfig):
         record = {**header, "split": split}
 
         record["loss"] = eval_stats[f"eval/{split}/loss"] = stats[f"{split}/loss_{hparam_fmt}"]
-        if args.task == "classification":
-            record["acc1"] = eval_stats[f"eval/{split}/acc1"] = stats[f"{split}/acc1_{hparam_fmt}"]
+        record["acc1"] = eval_stats[f"eval/{split}/acc1"] = stats[f"{split}/acc1_{hparam_fmt}"]
 
         table.append(record)
 
@@ -447,12 +439,6 @@ def train_one_epoch(
 
         target = batch.pop("target")
 
-        # handle single target regression
-        # predictions are always shape [batch_size, num_targets, num_classifiers], so
-        # need to match second dimension.
-        if args.task == "regression" and target.ndim == 1:
-            target = target.unsqueeze(-1)
-
         # expand last dimension of target to match prediction
         # note that the num_classifiers dimension has to go at the end bc this is
         # what nn.CrossEntropyLoss expects.
@@ -553,8 +539,6 @@ def evaluate(
         batch = ut.send_data(batch, device)
         target = batch.pop("target")
 
-        if args.task == "regression" and target.ndim == 1:
-            target = target.unsqueeze(-1)
         expand_shape = target.ndim * (-1,) + (num_classifiers,)
         target = target.unsqueeze(-1).expand(*expand_shape)
 
@@ -573,10 +557,9 @@ def evaluate(
 
     total_loss = criterion(preds, targets)
     total_loss = total_loss.reshape(-1, num_classifiers).mean(dim=0).tolist()
-    if args.task == "classification":
-        total_acc1 = [
-            ut.accuracy(preds[:, :, ii], targets[:, ii])[0].item() for ii in range(num_classifiers)
-        ]
+    total_acc1 = [
+        ut.accuracy(preds[:, :, ii], targets[:, ii])[0].item() for ii in range(num_classifiers)
+    ]
 
     stats = {}
     stats.update(
@@ -585,13 +568,12 @@ def evaluate(
             for ii, hparam in enumerate(model.hparams)
         }
     )
-    if args.task == "classification":
-        stats.update(
-            {
-                f"acc1_{format_hparam(ii, hparam)}": total_acc1[ii]
-                for ii, hparam in enumerate(model.hparams)
-            }
-        )
+    stats.update(
+        {
+            f"acc1_{format_hparam(ii, hparam)}": total_acc1[ii]
+            for ii, hparam in enumerate(model.hparams)
+        }
+    )
 
     stats = {f"{eval_name}/{k}": v for k, v in stats.items()}
 
