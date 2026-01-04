@@ -49,6 +49,8 @@ wd_scale_grid: [0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0]
 # Data loader
 num_workers: 8
 prefetch_factor: 8
+# oversample minority classes for balanced sampling
+balanced_sampling: false
 
 # Optimization
 epochs: 20
@@ -64,6 +66,11 @@ min_lr: 0.0
 warmup_epochs: 2
 weight_decay: 0.05
 clip_grad: 1.0
+
+# scoring metrics
+metrics:
+- acc
+- f1
 
 amp: true
 

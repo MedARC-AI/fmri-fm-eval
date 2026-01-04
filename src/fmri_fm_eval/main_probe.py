@@ -17,12 +17,13 @@ from typing import Iterable, Sequence
 
 import numpy as np
 import pandas as pd
+import sklearn.metrics
 import torch
 import torch.nn as nn
 import wandb
 from cloudpathlib import S3Path
 from omegaconf import DictConfig, OmegaConf
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 import fmri_fm_eval.utils as ut
 from fmri_fm_eval.heads import (
@@ -32,6 +33,7 @@ from fmri_fm_eval.heads import (
     MLPClassifier,
     pool_representation,
 )
+from fmri_fm_eval.datasets.base import HFDataset
 from fmri_fm_eval.models.registry import create_model, list_models
 from fmri_fm_eval.datasets.registry import create_dataset, list_datasets
 
@@ -95,34 +97,52 @@ def main(args: DictConfig):
     dataset_dict = create_dataset(
         args.dataset, space=backbone.__space__, **(args.dataset_kwargs or {})
     )
-    args.num_classes = dataset_dict["train"].num_classes
     for split, ds in dataset_dict.items():
         print(f"{split} (n={len(ds)}):\n{ds}\n")
+    train_dataset: HFDataset = dataset_dict["train"]
+    args.num_classes = train_dataset.num_classes
 
     if hasattr(transform, "fit"):
         print("fitting transform on training dataset")
-        transform.fit(dataset_dict["train"])
+        transform.fit(train_dataset)
 
     for split, ds in dataset_dict.items():
         ds.set_transform(transform)
 
-    loaders_dict = {}
+    # balanced class sampling for imbalanced classes
+    if args.balanced_sampling:
+        weights = 1 / (train_dataset.label_counts / train_dataset.label_counts.max())
+        print(f"sampling with balanced class weights: {np.round(weights, 2)}")
+        weights = weights[train_dataset.target_ids]
+        train_sampler = WeightedRandomSampler(weights, num_samples=len(train_dataset))
+    else:
+        train_sampler = None
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=args.batch_size,
+        shuffle=train_sampler is None,
+        sampler=train_sampler,
+        num_workers=args.num_workers,
+        prefetch_factor=args.prefetch_factor,
+        drop_last=True,
+    )
+
+    eval_loaders_dict = {}
     for split, dataset in dataset_dict.items():
-        loaders_dict[split] = DataLoader(
+        eval_loaders_dict[split] = DataLoader(
             dataset,
             batch_size=args.batch_size,
-            shuffle=split == "train",
+            shuffle=False,
             num_workers=args.num_workers,
             prefetch_factor=args.prefetch_factor,
+            drop_last=False,
         )
-    # we could also support more splits or different split names, but for now can keep
-    # things simple.
-    train_loader = loaders_dict["train"]
-    val_loader = loaders_dict["validation"]
+    val_loader = eval_loaders_dict["validation"]
 
     # prediction heads
     print("running backbone on example batch to get embedding shape")
-    embed_shape = get_embedding_shape(backbone, args.representation, dataset_dict["train"], device)
+    embed_shape = get_embedding_shape(backbone, args.representation, train_dataset, device)
     print(f"embedding feature shape ({args.representation}): {embed_shape}")
 
     print("initializing sweep of classifier heads")
@@ -188,7 +208,7 @@ def main(args: DictConfig):
             device,
         )
 
-        val_stats = evaluate(
+        val_stats, _, _ = evaluate(
             args,
             model,
             criterion,
@@ -203,8 +223,15 @@ def main(args: DictConfig):
 
         hparam_id, hparam, loss = get_best_hparams(model, val_stats)
         hparam_fmt = format_hparam(hparam_id, hparam)
+        hparam_scores = {
+            metric: val_stats[f"validation/{metric}_{hparam_fmt}"] for metric in args.metrics
+        }
+        hparam_scores_fmt = "  ".join(
+            f"{metric}: {score:.3f}" for metric, score in hparam_scores.items()
+        )
         print(
-            f"cv: [{epoch}]  best hparam: {hparam} ({hparam_id:03d}) ('{hparam_fmt}')  loss: {loss:.3f}"
+            f"cv: [{epoch}]  best hparam: {hparam} ({hparam_id:03d}) ('{hparam_fmt}')  "
+            f"loss: {loss:.3f}  {hparam_scores_fmt}"
         )
 
         best_stats = {
@@ -212,9 +239,10 @@ def main(args: DictConfig):
             "lr_best": hparam[0] * args.lr,
             "wd_best": hparam[1] * args.weight_decay,
             "train/loss_best": train_stats[f"train/loss_{hparam_fmt}"],
-            "validation/loss_best": val_stats[f"validation/loss_{hparam_fmt}"],
+            "validation/loss_best": loss,
         }
-        best_stats["validation/acc1_best"] = val_stats[f"validation/acc1_{hparam_fmt}"]
+        for metric, score in hparam_scores.items():
+            best_stats[f"validation/{metric}_best"] = score
 
         if log_wandb:
             wandb.log(best_stats, (epoch + 1) * args.steps_per_epoch)
@@ -271,8 +299,8 @@ def main(args: DictConfig):
     }
     table = []
 
-    for split, loader in loaders_dict.items():
-        stats = evaluate(
+    for split, loader in eval_loaders_dict.items():
+        stats, preds, targets = evaluate(
             args,
             model,
             criterion,
@@ -284,9 +312,13 @@ def main(args: DictConfig):
         record = {**header, "split": split}
 
         record["loss"] = eval_stats[f"eval/{split}/loss"] = stats[f"{split}/loss_{hparam_fmt}"]
-        record["acc1"] = eval_stats[f"eval/{split}/acc1"] = stats[f"{split}/acc1_{hparam_fmt}"]
+        for metric in args.metrics:
+            score = stats[f"{split}/{metric}_{hparam_fmt}"]
+            record[metric] = eval_stats[f"eval/{split}/{metric}"] = score
 
         table.append(record)
+
+        np.savez(output_dir / f"preds_{split}.npz", preds=preds, targets=targets)
 
     table = pd.DataFrame.from_records(table)
     table_fmt = table.to_markdown(index=False, floatfmt=".5g")
@@ -530,7 +562,7 @@ def evaluate(
 
     num_classifiers = len(model.classifiers)
 
-    preds = []
+    logits = []
     targets = []
 
     for batch_idx, batch in enumerate(
@@ -543,42 +575,42 @@ def evaluate(
         target = target.unsqueeze(-1).expand(*expand_shape)
 
         with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=args.amp):
-            pred = model(batch)
+            logit = model(batch)
 
-        preds.append(pred.cpu().float())
+        logits.append(logit.cpu().float())
         targets.append(target.cpu())
 
         if use_cuda:
             torch.cuda.synchronize()
 
     # average loss and acc over the full eval dataset
-    preds = torch.cat(preds)
+    logits = torch.cat(logits)
     targets = torch.cat(targets)
 
-    total_loss = criterion(preds, targets)
+    total_loss = criterion(logits, targets)
     total_loss = total_loss.reshape(-1, num_classifiers).mean(dim=0).tolist()
-    total_acc1 = [
-        ut.accuracy(preds[:, :, ii], targets[:, ii])[0].item() for ii in range(num_classifiers)
-    ]
+    stats = {
+        f"loss_{format_hparam(ii, hparam)}": total_loss[ii]
+        for ii, hparam in enumerate(model.hparams)
+    }
 
-    stats = {}
-    stats.update(
-        {
-            f"loss_{format_hparam(ii, hparam)}": total_loss[ii]
-            for ii, hparam in enumerate(model.hparams)
-        }
-    )
-    stats.update(
-        {
-            f"acc1_{format_hparam(ii, hparam)}": total_acc1[ii]
-            for ii, hparam in enumerate(model.hparams)
-        }
-    )
+    preds = torch.argmax(logits, dim=1).numpy()  # [N, nc]
+    targets = targets[:, 0].numpy()  # drop repeated targets [N]
+
+    for metric in args.metrics:
+        metric_fn = METRICS[metric]
+        for ii, hparam in enumerate(model.hparams):
+            stats[f"{metric}_{format_hparam(ii, hparam)}"] = metric_fn(targets, preds[:, ii])
 
     stats = {f"{eval_name}/{k}": v for k, v in stats.items()}
 
-    # TODO: return preds and targets to compute metrics offline?
-    return stats
+    return stats, preds, targets
+
+
+METRICS = {
+    "acc": sklearn.metrics.accuracy_score,
+    "f1": partial(sklearn.metrics.f1_score, average="macro"),
+}
 
 
 def format_hparam(idx: int, hparam: tuple[float, float]) -> str:
