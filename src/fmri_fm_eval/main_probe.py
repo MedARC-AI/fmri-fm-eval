@@ -18,6 +18,7 @@ from typing import Iterable, Sequence
 import numpy as np
 import pandas as pd
 import sklearn.metrics
+import sklearn.utils
 import torch
 import torch.nn as nn
 import wandb
@@ -311,13 +312,16 @@ def main(args: DictConfig):
         )
         record = {**header, "split": split}
 
+        preds = preds[:, hparam_id]
+        bootstrap_result = bootstrap_ci(args, preds, targets)
+
         record["loss"] = eval_stats[f"eval/{split}/loss"] = stats[f"{split}/loss_{hparam_fmt}"]
         for metric in args.metrics:
             score = stats[f"{split}/{metric}_{hparam_fmt}"]
             record[metric] = eval_stats[f"eval/{split}/{metric}"] = score
+            record[f"{metric}_std"] = bootstrap_result[metric]["std"]
 
         table.append(record)
-
         np.savez(output_dir / f"preds_{split}.npz", preds=preds, targets=targets)
 
     table = pd.DataFrame.from_records(table)
@@ -605,6 +609,25 @@ def evaluate(
     stats = {f"{eval_name}/{k}": v for k, v in stats.items()}
 
     return stats, preds, targets
+
+
+def bootstrap_ci(args: DictConfig, preds: np.ndarray, targets: np.ndarray):
+    random_state = sklearn.utils.check_random_state(args.seed)
+
+    sample_scores = defaultdict(list)
+    for _ in range(500):
+        preds_, targets_ = sklearn.utils.resample(
+            preds, targets, random_state=random_state, stratify=targets
+        )
+        for metric in args.metrics:
+            metric_fn = METRICS[metric]
+            sample_scores[metric].append(metric_fn(targets_, preds_))
+
+    result = {}
+    for metric, values in sample_scores.items():
+        result[metric] = {"mean": np.mean(values), "std": np.std(values)}
+
+    return result
 
 
 METRICS = {
