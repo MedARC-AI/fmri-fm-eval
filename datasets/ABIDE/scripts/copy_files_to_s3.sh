@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-base_dir="${PWD}/preprocessed/fmriprep"
+base_dir="${PWD}/data/fmriprep"
 #skip_list=("Caltech" "CMU_a")
 
 for dir in "$base_dir"/*/; do
@@ -25,7 +25,7 @@ done
 
 # set -euo pipefail
 # dataset=ABIDE
-# subject_list="${PWD}/sourcedata/subject_list.txt"
+# subject_list="${PWD}/sourcedata/ABIDE_subjects.txt"
 
 # while IFS=' ' read -r dataset subject; do
 #     [[ -z "$dataset" || -z "$subject" ]] && continue

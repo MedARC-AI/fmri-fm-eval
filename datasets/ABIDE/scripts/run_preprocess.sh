@@ -10,7 +10,7 @@ set +a
 
 #cd ${HOME}/ABIDE
 
-## ABIDE has 1112 subjects (Refer subject_list.txt)
+## ABIDE has 1112 subjects (Refer ABIDE_subjects.txt)
 start=1
 stop=96
 #stop=1112

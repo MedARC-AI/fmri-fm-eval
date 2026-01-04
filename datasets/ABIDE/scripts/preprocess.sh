@@ -6,7 +6,7 @@ if [[ -z $1 ]]; then
 fi
 
 subidx=$1
-subid=$(sed -n ${subidx}p metadata/subject_list.txt)
+subid=$(sed -n ${subidx}p metadata/ABIDE_subjects.txt)
 dataset=$(echo $subid | cut -d " " -f 1)
 subid=$(echo $subid | cut -d " " -f 2)
 
@@ -38,9 +38,3 @@ docker run --rm \
     --nprocs 1 \
     --omp-nthreads 1 \
     2>&1 | tee -a ${logdir}/${dataset}_${subid}.txt
-
-# aws s3 sync \
-#     ${outdir} \
-#     s3://medarc/fmri-fm-eval/ABIDE/fmriprep/${dataset} \
-#     --exclude '*' \
-#     --include '*sub-'${subid}'*'
