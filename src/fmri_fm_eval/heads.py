@@ -124,49 +124,29 @@ class MLPClassifier(nn.Module):
         in_dim: int,
         out_dim: int,
         hidden_dim: int | None = None,
-        num_layers: int = 1,
-        dropout: float = 0.5,
+        dropout: float = 0.0,
     ):
         super().__init__()
-        if num_layers < 1:
-            raise ValueError("MLPClassifier requires at least one layer.")
-
         hidden_dim = hidden_dim or in_dim
-        self.activation = nn.ReLU()
-        self.dropout = nn.Dropout(dropout) if dropout > 0 else None
 
-        layers = []
-        dim_in = in_dim
-        for _ in range(num_layers):
-            block = nn.Sequential(
-                nn.Linear(dim_in, hidden_dim),
-                nn.LayerNorm(hidden_dim),
-            )
-            layers.append(block)
-            dim_in = hidden_dim
-            
-        self.layers = nn.ModuleList(layers)
-        self.output_proj = nn.Linear(hidden_dim, out_dim)
+        self.fc1 = nn.Linear(in_dim, hidden_dim)
+        self.norm = nn.LayerNorm(hidden_dim)
+        self.act = nn.ReLU()
+        self.drop = nn.Dropout(dropout)
+        self.fc2 = nn.Linear(hidden_dim, out_dim)
         self.init_weights()
 
     def init_weights(self):
-        for module in [*self.layers, self.output_proj]:
-            if isinstance(module, nn.Sequential) or isinstance(module, nn.Module):
-                for layer in module.modules():
-                    if isinstance(layer, nn.Linear):
-                        nn.init.trunc_normal_(layer.weight, std=0.02)
-                        nn.init.zeros_(layer.bias)
+        nn.init.trunc_normal_(self.fc1.weight, std=0.02)
+        nn.init.zeros_(self.fc1.bias)
+        nn.init.trunc_normal_(self.fc2.weight, std=0.02)
+        nn.init.zeros_(self.fc2.bias)
 
-    def forward(self, feat_tokens: Tensor) -> Tensor:
-        B, T, D = feat_tokens.shape
-        x = feat_tokens.reshape(B * T, D)
-
-        for block in self.layers:
-            x = block(x)
-            x = self.activation(x)
-            if self.dropout is not None:
-                x = self.dropout(x)
-
-        x = self.output_proj(x)
-        x = x.reshape(B, T, -1)
+    def forward(self, x: Tensor) -> Tensor:
+        B, T, D = x.shape
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.drop(x)
+        x = self.norm(x)
+        x = self.fc2(x)
         return x.mean(dim=1)

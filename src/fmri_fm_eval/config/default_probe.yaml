@@ -39,8 +39,7 @@ attn_pool_embed_dim: null
 
 # Settings for mlp classifier
 mlp_hidden_dim: 800
-mlp_layers: 1
-mlp_dropout: 0.5
+mlp_dropout: 0.0
 
 # Grid of learning rate and weight decay scale factors for classifier grid.
 lr_scale_grid: [0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0]
