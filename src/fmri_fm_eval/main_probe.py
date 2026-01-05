@@ -27,13 +27,8 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
 import fmri_fm_eval.utils as ut
-from fmri_fm_eval.heads import (
-    ClassifierGrid,
-    LinearClassifier,
-    AttnPoolClassifier,
-    MLPClassifier,
-    pool_representation,
-)
+import fmri_fm_eval.version
+from fmri_fm_eval.classifiers import ClassifierGrid, create_classifier, list_classififiers
 from fmri_fm_eval.datasets.base import HFDataset
 from fmri_fm_eval.models.registry import create_model, list_models
 from fmri_fm_eval.datasets.registry import create_dataset, list_datasets
@@ -49,7 +44,10 @@ def main(args: DictConfig):
     ut.random_seed(args.seed)
 
     if not args.get("name"):
-        args.name = f"{args.name_prefix}/{args.model}/{args.representation}/{args.dataset}"
+        args.name = (
+            f"{args.name_prefix}/"
+            f"{args.model}/{args.representation}__{args.classifier}/{args.dataset}"
+        )
     args.output_dir = f"{args.output_root}/{args.name}"
     output_dir = Path(args.output_dir)
 
@@ -81,9 +79,10 @@ def main(args: DictConfig):
     ut.setup_for_distributed(log_path=output_dir / "log.txt")
 
     print("fMRI foundation model probe eval")
-    print(f"start: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"cwd: {Path.cwd()}")
+    print(f"version: {fmri_fm_eval.version.__version__}")
     print(ut.get_sha())
+    print(f"cwd: {Path.cwd()}")
+    print(f"start: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("config:", OmegaConf.to_yaml(args), sep="\n")
 
     # backbone model
@@ -125,7 +124,7 @@ def main(args: DictConfig):
         shuffle=train_sampler is None,
         sampler=train_sampler,
         num_workers=args.num_workers,
-        prefetch_factor=args.prefetch_factor,
+        prefetch_factor=args.prefetch_factor if args.num_workers else None,
         drop_last=True,
     )
 
@@ -136,18 +135,18 @@ def main(args: DictConfig):
             batch_size=args.batch_size,
             shuffle=False,
             num_workers=args.num_workers,
-            prefetch_factor=args.prefetch_factor,
+            prefetch_factor=args.prefetch_factor if args.num_workers else None,
             drop_last=False,
         )
     val_loader = eval_loaders_dict["validation"]
 
     # prediction heads
-    print("running backbone on example batch to get embedding shape")
-    embed_shape = get_embedding_shape(backbone, args.representation, train_dataset, device)
-    print(f"embedding feature shape ({args.representation}): {embed_shape}")
+    print("running backbone on example batch to get embedding dim")
+    embed_dim = get_embedding_dim(args, backbone, train_dataset, device)
+    print(f"embedding feature dim ({args.representation}): {embed_dim}")
 
     print("initializing sweep of classifier heads")
-    classifiers, param_groups = make_classifiers(args, embed_shape, args.num_classes)
+    classifiers, param_groups = make_classifiers(args, embed_dim)
     model = ClassifierGrid(backbone, args.representation, classifiers)
     model.to(device)
     print(f"classifiers:\n{model.classifiers}")
@@ -189,7 +188,7 @@ def main(args: DictConfig):
     if ckpt_meta is not None:
         best_info = ckpt_meta["best_info"]
     else:
-        best_info = {"loss": float("inf")}
+        best_info = {"score": float("-inf")}
 
     # training loss
     criterion = nn.CrossEntropyLoss(reduction="none")
@@ -222,17 +221,18 @@ def main(args: DictConfig):
         if log_wandb:
             wandb.log(val_stats, (epoch + 1) * args.steps_per_epoch)
 
-        hparam_id, hparam, loss = get_best_hparams(model, val_stats)
+        hparam_id, hparam, cv_score = get_best_hparams(args, model, val_stats)
         hparam_fmt = format_hparam(hparam_id, hparam)
         hparam_scores = {
-            metric: val_stats[f"validation/{metric}_{hparam_fmt}"] for metric in args.metrics
+            metric: val_stats[f"validation/{metric}_{hparam_fmt}"]
+            for metric in ["loss"] + args.metrics
         }
         hparam_scores_fmt = "  ".join(
             f"{metric}: {score:.3f}" for metric, score in hparam_scores.items()
         )
         print(
             f"cv: [{epoch}]  best hparam: {hparam} ({hparam_id:03d}) ('{hparam_fmt}')  "
-            f"loss: {loss:.3f}  {hparam_scores_fmt}"
+            f"{hparam_scores_fmt}"
         )
 
         best_stats = {
@@ -240,7 +240,6 @@ def main(args: DictConfig):
             "lr_best": hparam[0] * args.lr,
             "wd_best": hparam[1] * args.weight_decay,
             "train/loss_best": train_stats[f"train/loss_{hparam_fmt}"],
-            "validation/loss_best": loss,
         }
         for metric, score in hparam_scores.items():
             best_stats[f"validation/{metric}_best"] = score
@@ -252,8 +251,13 @@ def main(args: DictConfig):
         with (output_dir / "train_log.json").open("a") as f:
             print(json.dumps(merged_stats), file=f)
 
-        if loss < best_info["loss"]:
-            best_info = {"loss": loss, "hparam": hparam, "hparam_id": hparam_id, "epoch": epoch}
+        if cv_score > best_info["score"]:
+            best_info = {
+                "score": cv_score,
+                "hparam": hparam,
+                "hparam_id": hparam_id,
+                "epoch": epoch,
+            }
             is_best = True
         else:
             is_best = False
@@ -284,7 +288,8 @@ def main(args: DictConfig):
 
     header = {
         "model": args.model,
-        "representation": args.representation,
+        "repr": args.representation,
+        "clf": args.classifier,
         "dataset": args.dataset,
         "epoch": best_info["epoch"],
         "lr": hparam[0] * args.lr,
@@ -344,9 +349,9 @@ def main(args: DictConfig):
 
 
 @torch.inference_mode()
-def get_embedding_shape(
+def get_embedding_dim(
+    args: DictConfig,
     backbone: nn.Module,
-    representation: str,
     dataset: torch.utils.data.Dataset,
     device: torch.device,
 ):
@@ -355,46 +360,24 @@ def get_embedding_shape(
     example_batch = ut.send_data(example_batch, device)
 
     cls_embeds, reg_embeds, patch_embeds = backbone(example_batch)
-    pooled = pool_representation(
-        cls_embeds, reg_embeds, patch_embeds, representation=representation
-    )
-    embed_shape = tuple(pooled.shape[1:])
-    return embed_shape
+    all_embeds = {"cls": cls_embeds, "reg": reg_embeds, "patch": patch_embeds}
+    embeds = all_embeds[args.representation]
+    embed_dim = embeds.shape[-1]
+    return embed_dim
 
 
-def make_classifiers(
-    args: DictConfig,
-    embed_shape: tuple[int, ...],
-    num_classes: int,
-):
+def make_classifiers(args: DictConfig, embed_dim: int):
     # create sweep of classifier heads with varying hparams
     all_classifiers = {}
     param_groups = {}
 
-    assert len(embed_shape) in {1, 2}
-
-    if len(embed_shape) == 1:
-        clf_fn = partial(LinearClassifier, embed_shape[-1], num_classes)
-    else:
-        sequence_clf = args.get("sequence_classifier", "attn_pool")
-        if sequence_clf == "attn_pool":
-            clf_fn = partial(
-                AttnPoolClassifier,
-                embed_shape[-1],
-                num_classes,
-                embed_dim=args.get("attn_pool_embed_dim"),
-            )
-        elif sequence_clf == "mlp":
-            clf_fn = partial(
-                MLPClassifier,
-                embed_shape[-1],
-                num_classes,
-                hidden_dim=args.get("mlp_hidden_dim"),
-                num_layers=args.get("mlp_layers", 1),
-                dropout=args.get("mlp_dropout", 0.5),
-            )
-        else:
-            raise ValueError(f"Unknown sequence classifier: {sequence_clf}")
+    clf_fn = partial(
+        create_classifier,
+        name=args.classifier,
+        in_dim=embed_dim,
+        out_dim=args.num_classes,
+        **(args.classifier_kwargs or {}),
+    )
 
     # all classifiers get same init
     init_state = None
@@ -641,15 +624,21 @@ def format_hparam(idx: int, hparam: tuple[float, float]) -> str:
     return f"{idx:03d}_lr{lr:.1e}_wd{weight_decay:.1e}"
 
 
-def get_best_hparams(model: ClassifierGrid, stats: dict[str, float]):
-    losses = [
-        stats[f"validation/loss_{format_hparam(ii, hparam)}"]
+def get_best_hparams(args: DictConfig, model: ClassifierGrid, stats: dict[str, float]):
+    metric = args.cv_metric
+    if metric.startswith("neg_"):
+        sign = -1
+        metric = metric[4:]
+    else:
+        sign = 1
+    scores = [
+        sign * stats[f"validation/{metric}_{format_hparam(ii, hparam)}"]
         for ii, hparam in enumerate(model.hparams)
     ]
-    best_id = int(np.argmin(losses))
+    best_id = int(np.argmax(scores))
     best_hparam = model.hparams[best_id]
-    best_loss = losses[best_id]
-    return best_id, best_hparam, best_loss
+    best_score = scores[best_id]
+    return best_id, best_hparam, best_score
 
 
 def save_model(args, epoch, model, optimizer, meta=None, is_best=None):
@@ -697,6 +686,12 @@ if __name__ == "__main__":
         type=str,
         help=f"[{', '.join(list_models())}]",
     )
+    parser.add_argument("representation", type=str, help="[cls, reg, patch]")
+    parser.add_argument(
+        "classifier",
+        type=str,
+        help=f"[{', '.join(list_classififiers())}]",
+    )
     parser.add_argument(
         "dataset",
         type=str,
@@ -711,5 +706,7 @@ if __name__ == "__main__":
     if args.overrides:
         cfg = OmegaConf.unsafe_merge(cfg, OmegaConf.from_dotlist(args.overrides))
     cfg.model = args.model
+    cfg.representation = args.representation
+    cfg.classifier = args.classifier
     cfg.dataset = args.dataset
     main(cfg)

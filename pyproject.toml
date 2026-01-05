@@ -55,7 +55,7 @@ brainlm = [
 ]
 
 [tool.setuptools_scm]
-version_file = "src/fmri_fm_eval/_version.py"
+version_file = "src/fmri_fm_eval/version.py"
 
 [tool.uv.sources]
 nsdcode = { git = "https://github.com/cvnlab/nsdcode.git", rev = "bfd36a503cc90a3eb3ebfd69b269403f7e186924" }

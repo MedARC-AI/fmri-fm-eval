@@ -1,13 +1,15 @@
 # References:
 # capi: https://github.com/facebookresearch/capi/blob/main/eval_classification.py
 
+import inspect
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
 
-# backbone classification wrappers adapted from capi with minor changes
+# backbone classification wrappers adapted from capi
 
 
 class ClassifierGrid(nn.Module):
@@ -28,42 +30,12 @@ class ClassifierGrid(nn.Module):
 
     def forward(self, *args, **kwargs) -> Tensor:
         cls_embeds, reg_embeds, patch_embeds = self.backbone(*args, **kwargs)
-        pooled = pool_representation(
-            cls_embeds, reg_embeds, patch_embeds, representation=self.representation
-        )
+        all_embeds = {"cls": cls_embeds, "reg": reg_embeds, "patch": patch_embeds}
+        embeds = all_embeds[self.representation]
 
         # [B, num_classes, num_classifiers]
-        all_logit = torch.stack([clf(pooled) for clf in self.classifiers], dim=-1)
+        all_logit = torch.stack([clf(embeds) for clf in self.classifiers], dim=-1)
         return all_logit
-
-
-def pool_representation(
-    cls_embeds: Tensor | None,
-    reg_embeds: Tensor | None,
-    patch_embeds: Tensor | None,
-    representation: str,
-):
-    if representation == "cls":
-        pooled = cls_embeds.squeeze(1)  # [B, D]
-    elif representation == "avg_patch":
-        pooled = patch_embeds.mean(1)  # [B, D]
-    elif representation == "cls_avg_patch":
-        pooled = torch.cat([cls_embeds.squeeze(1), patch_embeds.mean(1)], dim=-1)  # [B, 2 * D]
-    elif representation == "avg_reg":
-        pooled = reg_embeds.mean(1)  # [B, D]
-    elif representation == "concat_reg":
-        pooled = reg_embeds.flatten(1, 2)  # [B, R * D]
-    # Object features (registers) for the attention pooling classifiers
-    elif representation == "reg":
-        assert reg_embeds is not None
-        pooled = reg_embeds
-    # Patch features for the attention pooling classifiers
-    elif representation == "patch":
-        assert patch_embeds is not None
-        pooled = patch_embeds  # [B, h * w, D]
-    else:
-        raise ValueError(f"{representation=} not implemented")
-    return pooled
 
 
 class LinearClassifier(nn.Module):
@@ -76,8 +48,12 @@ class LinearClassifier(nn.Module):
         nn.init.trunc_normal_(self.linear.weight, std=0.02)
         nn.init.zeros_(self.linear.bias)
 
-    def forward(self, cls_token):
-        return self.linear(cls_token)
+    def forward(self, x: Tensor):
+        assert x.ndim in {2, 3}, "linear classifier only accepts 2D or 3D inputs"
+        if x.ndim == 3:
+            x = x.mean(dim=1)
+        x = self.linear(x)
+        return x
 
 
 class AttnPoolClassifier(nn.Module):
@@ -99,23 +75,24 @@ class AttnPoolClassifier(nn.Module):
         nn.init.trunc_normal_(self.linear.weight, std=0.02)
         nn.init.zeros_(self.linear.bias)
 
-    def forward(self, feat_tokens):
-        B, N, _ = feat_tokens.shape
+    def forward(self, x: Tensor):
+        assert x.ndim == 3, "attn classifier only accepts 3D inputs"
+        B, N, _ = x.shape
         D = self.embed_dim
 
         q = self.query_token.expand(B, 1, -1)
         q = q.reshape(B, 1, self.num_heads, D // self.num_heads)  # [B, 1, head, D_head]
         q = q.permute(0, 2, 1, 3)  # [B, head, 1, D_head]
 
-        kv = self.kv(feat_tokens).reshape(
-            B, N, 2, self.num_heads, D // self.num_heads
-        )  # [B, N, 2, head, D_head]
+        # [B, N, 2, head, D_head]
+        kv = self.kv(x).reshape(B, N, 2, self.num_heads, D // self.num_heads)
         kv = kv.permute(2, 0, 3, 1, 4)  # [2, B, head, N, D_head]
         k, v = torch.unbind(kv, dim=0)  # 2 * [B, head, N, D_head]
 
         x = F.scaled_dot_product_attention(q, k, v)  # [B, head, 1, D_head]
         x = x.reshape(B, D)  # [B, D]
-        return self.linear(x)
+        x = self.linear(x)
+        return x
 
 
 class MLPClassifier(nn.Module):
@@ -123,17 +100,17 @@ class MLPClassifier(nn.Module):
         self,
         in_dim: int,
         out_dim: int,
-        hidden_dim: int | None = None,
+        embed_dim: int | None = None,
         dropout: float = 0.0,
     ):
         super().__init__()
-        hidden_dim = hidden_dim or in_dim
+        embed_dim = embed_dim or in_dim
 
-        self.fc1 = nn.Linear(in_dim, hidden_dim)
-        self.norm = nn.LayerNorm(hidden_dim)
+        self.fc1 = nn.Linear(in_dim, embed_dim)
+        self.norm = nn.LayerNorm(embed_dim)
         self.act = nn.ReLU()
         self.drop = nn.Dropout(dropout)
-        self.fc2 = nn.Linear(hidden_dim, out_dim)
+        self.fc2 = nn.Linear(embed_dim, out_dim)
         self.init_weights()
 
     def init_weights(self):
@@ -143,10 +120,36 @@ class MLPClassifier(nn.Module):
         nn.init.zeros_(self.fc2.bias)
 
     def forward(self, x: Tensor) -> Tensor:
-        B, T, D = x.shape
+        assert x.ndim in {2, 3}, "mlp classifier only accepts 2D or 3D inputs"
         x = self.fc1(x)
         x = self.act(x)
         x = self.drop(x)
         x = self.norm(x)
         x = self.fc2(x)
-        return x.mean(dim=1)
+        if x.ndim == 3:
+            x = x.mean(dim=1)
+        return x
+
+
+CLASSIFIERS = {
+    "linear": LinearClassifier,
+    "attn": AttnPoolClassifier,
+    "mlp": MLPClassifier,
+}
+
+
+def filter_kwargs(func, kwargs):
+    sigature = inspect.signature(func)
+    kwargs = {k: v for k, v in kwargs.items() if k in sigature.parameters}
+    return kwargs
+
+
+def create_classifier(name: str, in_dim: int, out_dim: int, **kwargs):
+    clf_cls = CLASSIFIERS[name]
+    kwargs = filter_kwargs(clf_cls, kwargs)
+    clf = clf_cls(in_dim=in_dim, out_dim=out_dim, **kwargs)
+    return clf
+
+
+def list_classififiers():
+    return list(CLASSIFIERS)

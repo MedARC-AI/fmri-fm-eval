@@ -18,28 +18,12 @@ dataset_kwargs: {}
 
 # Classifier settings
 
-# Input pooled embedding
-#   - cls
-#   - avg_patch
-#   - cls_avg_patch
-#   - avg_reg
-#   - concat_reg
-#   - reg
-#   - patch
-representation: cls
-
-# Classifier to use when the pooled representation is a sequence (len > 1)
-#   - attn_pool
-#   - mlp
-sequence_classifier: attn_pool
-
-# Intermediate embed dim for attentive probe
-# defaults to the input embed dim
-attn_pool_embed_dim: null
-
-# Settings for mlp classifier
-mlp_hidden_dim: 800
-mlp_dropout: 0.0
+classifier_kwargs:
+  # Intermediate embed dim for attn and mlp classifiers
+  # Defaults to input embed dim
+  embed_dim: null
+  # Dropout for mlp classifier
+  dropout: 0.0
 
 # Grid of learning rate and weight decay scale factors for classifier grid.
 lr_scale_grid: [0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0]
@@ -70,6 +54,10 @@ clip_grad: 1.0
 metrics:
 - acc
 - f1
+
+# any of the metrics, or neg_loss
+# assumes higher is better
+cv_metric: f1
 
 amp: true
 

@@ -12,12 +12,10 @@ class IdentityBackbone(nn.Module):
         return f"'{self.__space__}'"
 
     def forward(self, batch: dict[str, Tensor]) -> Embeddings:
-        # Processed datasets stored via make_hcpya_rest1lr_dataset.py expose the
-        # region-aggregated time series under the "bold" key.
+        # get ROI time series, shape [B, T, D]
         roi_time_series = batch["bold"]
-        # Expose the raw temporal sequence as register tokens so downstream probes
-        # can operate over (B, T, D) features without any learned backbone.
-        return None, roi_time_series, None
+        # return as patch embeddings
+        return None, None, roi_time_series
 
 
 @register_model
