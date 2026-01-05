@@ -3,7 +3,7 @@ from typing import Protocol
 import nibabel as nib
 import numpy as np
 from templateflow import api as tflow
-from nilearn.image import resample_to_img
+from nilearn.image import resample_img
 
 from . import nisc
 
@@ -73,10 +73,6 @@ def flat_reader() -> Reader:
     return fn
 
 
-MNI152_2MM_SHAPE = (91, 109, 91)
-MNI152_1pt6MM_SHAPE = (113, 136, 113)
-
-
 def mni_cortex_reader() -> Reader:
     roi_path = nisc.fetch_schaefer(400, space="mni")
     roi_img = nib.load(roi_path)
@@ -84,17 +80,7 @@ def mni_cortex_reader() -> Reader:
 
     def fn(path: str):
         img = nib.load(path)
-
-        # 1.6mm resolution used for hcp 7T
-        if img.shape[:3] == MNI152_1pt6MM_SHAPE:
-            img = resample_to_img(
-                img, roi_img, interpolation="linear", force_resample=True, copy_header=True
-            )
-
-        assert img.shape[:3] == MNI152_2MM_SHAPE, (
-            f"Invalid image shape {img.shape}; expected {MNI152_2MM_SHAPE}."
-        )
-
+        img = _ensure_mni152_2mm(img)
         series = np.ascontiguousarray(img.get_fdata().T)
         series = series[:, mask]
         return series
@@ -106,14 +92,34 @@ def mni_reader() -> Reader:
     roi_path = tflow.get(
         "MNI152NLin6Asym", desc="brain", resolution=2, suffix="mask", extension="nii.gz"
     )
-    mask = nisc.read_nifti_data(roi_path) > 0
+    roi_img = nib.load(roi_path)
+    mask = np.ascontiguousarray(roi_img.get_fdata().T) > 0
 
     def fn(path: str):
-        series = nisc.read_nifti_data(path)
+        img = nib.load(path)
+        img = _ensure_mni152_2mm(img)
+        series = np.ascontiguousarray(img.get_fdata().T)
         series = series[:, mask]
         return series
 
     return fn
+
+
+MNI152_2MM_SHAPE = (91, 109, 91)
+MNI152_2MM_AFFINE = (
+    (-2.0, 0.0, 0.0, 90.0),
+    (0.0, 2.0, 0.0, -126.0),
+    (0.0, 0.0, 2.0, -72.0),
+    (0.0, 0.0, 0.0, 1.0),
+)
+
+
+def _ensure_mni152_2mm(img: nib.Nifti1Image, interpolation: str = "linear"):
+    if img.shape[:3] != MNI152_2MM_SHAPE:
+        img = resample_img(
+            img, MNI152_2MM_AFFINE, MNI152_2MM_SHAPE, interpolation=interpolation, copy_header=True
+        )
+    return img
 
 
 READER_DICT = {
