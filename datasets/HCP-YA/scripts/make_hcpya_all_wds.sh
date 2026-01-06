@@ -3,7 +3,7 @@
 spaces=(
     flat
     schaefer400
-    mni
+    mni_cortex
 )
 
 # nb, volume data not currently stored locally
@@ -18,8 +18,9 @@ outdir="s3://medarc/fmri-fm-eval/processed"
 
 log_path="logs/make_hcpya_all_wds.log"
 
-# for ii in {0..2}; do
-for ii in 2; do
+spaceids="0 1 2"
+
+for ii in $spaceids; do
     space=${spaces[ii]}
     root=${roots[ii]}
 

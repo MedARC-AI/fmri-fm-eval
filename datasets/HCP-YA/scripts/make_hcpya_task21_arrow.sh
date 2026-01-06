@@ -21,14 +21,16 @@ roots=(
     s3://hcp-openaccess/HCP_1200
 )
 
-log_path="logs/make_hcpya_rest1lr_arrow.log"
+log_path="logs/make_hcpya_task21_arrow.log"
 
-spaceids="0 1 2 3 4 5"
+# spaceids="0 1 2 3 4 5"
+# spaceids="3 4 5"
+spaceids="4"
 
 for ii in $spaceids; do
     space=${spaces[ii]}
     root=${roots[ii]}
-    uv run python scripts/make_hcpya_rest1lr_arrow.py \
+    uv run python scripts/make_hcpya_task21_arrow.py \
         --space "${space}" \
         --root "${root}" \
         2>&1 | tee -a "${log_path}"

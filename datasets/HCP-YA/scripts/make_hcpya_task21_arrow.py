@@ -14,6 +14,10 @@ from cloudpathlib import AnyPath, CloudPath
 import fmri_fm_eval.nisc as nisc
 import fmri_fm_eval.readers as readers
 
+# use smaller writer batch size to avoid OverflowError on very large mni data
+# https://github.com/huggingface/datasets/issues/6422
+hfds.config.DEFAULT_MAX_BATCH_SIZE = 256
+
 logging.basicConfig(
     format="[%(levelname)s %(asctime)s]: %(message)s",
     level=logging.INFO,
@@ -28,33 +32,54 @@ ROOT = Path(__file__).parents[1]
 HCP_ROOT = ROOT / "data/sourcedata/HCP_1200"
 META_PATH = ROOT / "metadata/hcpya_metadata.parquet"
 
-# ~300 subs total, 1:1:1 ratio
+# ~600 subs total, 4:1:1 ratio
 SUB_BATCH_SPLITS = {
-    "train": [0, 1],
+    "train": [0, 1, 2, 3, 4, 5, 6, 7],
     "validation": [16, 17],
     "test": [18, 19],
 }
-# number of runs per batch
-NUM_RUNS_PER_BATCH = 200
+
 # clip length
 NUM_FRAMES = 16
-# clip sampling stride
-STRIDE = 64
-
-# https://www.humanconnectome.org/hcp-protocols-ya-3t-imaging
-# https://www.humanconnectome.org/hcp-protocols-ya-7t-imaging
-HCP_TR = {"3T": 0.72, "7T": 1.0}
 
 # Resample all time series to 1s tr.
 TARGET_TR = 1.0
 INTERPOLATION = "pchip"
 
-# Fixed seed for sampling runs.
-SEED = 8581
+# https://www.humanconnectome.org/hcp-protocols-ya-3t-imaging
+# https://www.humanconnectome.org/hcp-protocols-ya-7t-imaging
+HCP_TR = {"3T": 0.72, "7T": 1.0}
+
+# 21 task conditions for 6 tasks
+# (excludes gambling due to fast event related design)
+HCP_TASK21_TASKS = ["EMOTION", "LANGUAGE", "MOTOR", "RELATIONAL", "SOCIAL", "WM"]
+HCP_TASK21_TRIAL_TYPES = {
+    "fear": 0,
+    "neut": 1,
+    "math": 2,
+    "story": 3,
+    "lf": 4,
+    "lh": 5,
+    "rf": 6,
+    "rh": 7,
+    "t": 8,
+    "match": 9,
+    "relation": 10,
+    "mental": 11,
+    "rnd": 12,
+    "0bk_body": 13,
+    "2bk_body": 14,
+    "0bk_faces": 15,
+    "2bk_faces": 16,
+    "0bk_places": 17,
+    "2bk_places": 18,
+    "0bk_tools": 19,
+    "2bk_tools": 20,
+}
 
 
 def main(args):
-    outdir = ROOT / f"data/processed/hcpya-miniclips.{args.space}.arrow"
+    outdir = ROOT / f"data/processed/hcpya-task21.{args.space}.arrow"
     _logger.info("Generating dataset: %s", outdir)
     if outdir.exists():
         _logger.warning("Output %s exists; exiting.", outdir)
@@ -66,23 +91,41 @@ def main(args):
     with (ROOT / "metadata/hcpya_subject_batch_splits.json").open() as f:
         sub_batch_splits = json.load(f)
 
-    rng = np.random.default_rng(SEED)
     meta_df = pd.read_parquet(META_PATH)
 
-    # pick a random sample of paths after restricting to the given batches of subjects.
+    # get all task fmri paths for each batch of subjects
     path_splits = {}
+    # map from paths to events
+    all_events = {}
     for split, batch_ids in SUB_BATCH_SPLITS.items():
         split_subjects = [
             sub for batch_id in batch_ids for sub in sub_batch_splits[f"batch-{batch_id:02d}"]
         ]
-        sub_mask = meta_df["sub"].isin(split_subjects)
-        split_paths = sorted(meta_df.loc[sub_mask, "path"].values)
+        sub_mask = (
+            meta_df["sub"].isin(split_subjects)
+            & meta_df["task"].isin(HCP_TASK21_TASKS)
+            & (meta_df["mag"] == "3T")  # tbf, these tasks are all in 3T, but just to be explicit
+            & (meta_df["dir"] == "LR")  # restrict to LR phase direction only
+        )
 
-        num_runs = len(batch_ids) * NUM_RUNS_PER_BATCH
-        split_paths = rng.choice(split_paths, num_runs, replace=False)
-        path_splits[split] = split_paths.tolist()
+        sub_df = meta_df.loc[sub_mask]
+
+        # only keep subjects with complete task data
+        counts = sub_df.groupby("sub").agg({"task": "nunique"})
+        include_subs = counts.index.values[counts["task"] == len(HCP_TASK21_TASKS)]
+        sub_df = sub_df.loc[sub_df["sub"].isin(include_subs)]
+
+        for path, events in zip(sub_df["path"], sub_df["events"]):
+            # "100307/MNINonLinear/Results/tfMRI_EMOTION_LR"
+            # this way it works for both surface and mni (bit hacky)
+            key = str(Path(path).parent)
+            all_events[key] = events
+
+        path_splits[split] = sorted(sub_df["path"].tolist())
 
     # volume space for a424 and mni, otherwise cifti space
+    # TODO: hacky, the reader should know what input space it needs. we shouldn't need
+    # to remember this in every script.
     if args.space in {"a424", "mni", "mni_cortex"}:
         for split, split_paths in path_splits.items():
             path_splits[split] = [
@@ -98,6 +141,8 @@ def main(args):
 
     # the bold data are scaled to mean 0, stdev 1 and then truncated to float16 to save
     # space. but we keep the mean and std to reverse this since some models need this.
+    # note, the mean and std are computed over the entire run and are redundant across
+    # clips from the same run.
     features = hfds.Features(
         {
             "sub": hfds.Value("string"),
@@ -106,9 +151,11 @@ def main(args):
             "mag": hfds.Value("string"),
             "dir": hfds.Value("string"),
             "path": hfds.Value("string"),
-            "start": hfds.Value("int32"),
-            "end": hfds.Value("int32"),
+            "start": hfds.Value("float32"),  # clip start and end in secs
+            "end": hfds.Value("float32"),
             "tr": hfds.Value("float32"),
+            "cond": hfds.Value("string"),
+            "cond_id": hfds.Value("int32"),
             "bold": hfds.Array2D(shape=(None, dim), dtype="float16"),
             "mean": hfds.Array2D(shape=(1, dim), dtype="float32"),
             "std": hfds.Array2D(shape=(1, dim), dtype="float32"),
@@ -122,7 +169,12 @@ def main(args):
             dataset_dict[split] = hfds.Dataset.from_generator(
                 generate_samples,
                 features=features,
-                gen_kwargs={"paths": paths, "root": root, "reader": reader, "dim": dim},
+                gen_kwargs={
+                    "paths": paths,
+                    "root": root,
+                    "all_events": all_events,
+                    "reader": reader,
+                },
                 num_proc=args.num_proc,
                 split=hfds.NamedSplit(split),
                 cache_dir=tmpdir,
@@ -135,7 +187,13 @@ def main(args):
         dataset.save_to_disk(outdir, max_shard_size="300MB")
 
 
-def generate_samples(paths: list[str], *, root: AnyPath, reader: readers.Reader, dim: int):
+def generate_samples(
+    paths: list[str],
+    *,
+    root: AnyPath,
+    all_events: dict[list[dict[str, float]]],
+    reader: readers.Reader,
+):
     for path, fullpath in prefetch(root, paths):
         meta = parse_hcp_metadata(fullpath)
         tr = HCP_TR[meta["mag"]]
@@ -146,18 +204,29 @@ def generate_samples(paths: list[str], *, root: AnyPath, reader: readers.Reader,
         series = nisc.resample_timeseries(series, tr=tr, new_tr=TARGET_TR, kind=INTERPOLATION)
         tr = TARGET_TR
 
-        for start in range(0, len(series) - STRIDE + 1, STRIDE):
+        key = str(Path(path).parent)
+        events = all_events[key]
+        for event in events:
+            cond = event["trial_type"]
+            if cond not in HCP_TASK21_TRIAL_TYPES:
+                continue
+            cond_id = HCP_TASK21_TRIAL_TYPES[cond]
+
+            start = int(event["onset"] / tr)
             end = start + NUM_FRAMES
-            bold = series[start:end]
-            assert len(bold) == NUM_FRAMES
+            if end > len(series):
+                continue
+            clip = series[start:end]
 
             sample = {
                 **meta,
                 "path": str(path),
-                "start": start,
-                "end": end,
+                "start": start * tr,
+                "end": end * tr,
                 "tr": tr,
-                "bold": bold.astype(np.float16),
+                "cond": cond,
+                "cond_id": cond_id,
+                "bold": clip.astype(np.float16),
                 "mean": mean.astype(np.float32),
                 "std": std.astype(np.float32),
             }
@@ -203,7 +272,9 @@ def parse_hcp_metadata(path: Path) -> dict[str, str]:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=str, default=None)
-    parser.add_argument("--space", type=str, default="fslr64k", choices=list(readers.READER_DICT))
+    parser.add_argument(
+        "--space", type=str, default="schaefer400", choices=list(readers.READER_DICT)
+    )
     parser.add_argument("--num_proc", "-j", type=int, default=32)
     args = parser.parse_args()
     sys.exit(main(args))

@@ -57,3 +57,18 @@ def hcpya_rest1lr_neofacn(space: str, **kwargs):
 @register_dataset
 def hcpya_rest1lr_pmat24(space: str, **kwargs):
     return _create_hcpya_rest1lr(space, target="pmat24", **kwargs)
+
+
+@register_dataset
+def hcpya_task21(space: str, **kwargs):
+    target_key = "cond_id"
+
+    dataset_dict = {}
+    splits = ["train", "validation", "test"]
+    for split in splits:
+        url = f"{HCPYA_ROOT}/hcpya-task21.{space}.arrow/{split}"
+        dataset = hfds.load_dataset("arrow", data_files=f"{url}/*.arrow", split="train", **kwargs)
+        dataset = HFDataset(dataset, target_key=target_key)
+        dataset_dict[split] = dataset
+
+    return dataset_dict
