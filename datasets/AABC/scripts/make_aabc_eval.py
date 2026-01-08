@@ -33,9 +33,9 @@ _logger = logging.getLogger(__name__)
 ROOT = Path(__file__).parents[1]
 AABC_ROOT = Path(os.getenv("AABC_ROOT", "/teamspace/studios/this_studio/AABC_data"))
 
-# Evaluation pool uses batches 14-19, then split 70/15/15
-# Batches 0-13 are reserved for pretraining
-EVAL_BATCHES = list(range(14, 20))
+# Evaluation pool uses batches 18-19, then split 70/15/15
+# Batches 0-17 are reserved for pretraining
+EVAL_BATCHES = [18, 19]
 SPLIT_SEED = 2912
 
 # Split ratios (train/val/test)
