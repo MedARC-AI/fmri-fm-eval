@@ -87,6 +87,20 @@ def get_brain_model_axis(cifti: Cifti2Image) -> BrainModelAxis:
     raise ValueError("No brain model axis found in cifti")
 
 
+def read_gifti_surf_data(path: str | Path) -> np.ndarray:
+    path_lh = str(path).replace(".rh", ".lh")
+    path_rh = str(path).replace(".lh", ".rh")
+
+    img_lh = nib.load(path_lh)
+    series_lh = np.stack([da.data for da in img_lh.darrays])
+
+    img_rh = nib.load(path_rh)
+    series_rh = np.stack([da.data for da in img_rh.darrays])
+
+    series = np.concatenate([series_lh, series_rh], axis=1)
+    return series
+
+
 # Parcellation utils
 
 

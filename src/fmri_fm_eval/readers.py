@@ -14,7 +14,10 @@ class Reader(Protocol):
 
 def fslr64k_reader() -> Reader:
     def fn(path: str):
-        series = nisc.read_cifti_surf_data(path)
+        if str(path).endswith(".gii"):
+            series = nisc.read_gifti_surf_data(path)
+        else:
+            series = nisc.read_cifti_surf_data(path)
         return series
 
     return fn
@@ -32,7 +35,10 @@ def schaefer400_reader() -> Reader:
     parcavg = nisc.parcel_average_schaefer_fslr64k(400)
 
     def fn(path: str):
-        series = nisc.read_cifti_surf_data(path)
+        if str(path).endswith(".gii"):
+            series = nisc.read_gifti_surf_data(path)
+        else:
+            series = nisc.read_cifti_surf_data(path)
         series = parcavg(series)
         return series
 
@@ -65,7 +71,10 @@ def flat_reader() -> Reader:
     resampler = nisc.flat_resampler_fslr64k_224_560()
 
     def fn(path: str):
-        series = nisc.read_cifti_surf_data(path)
+        if str(path).endswith(".gii"):
+            series = nisc.read_gifti_surf_data(path)
+        else:
+            series = nisc.read_cifti_surf_data(path)
         series = resampler.transform(series, interpolation="linear")
         series = series[:, resampler.mask_]
         return series
