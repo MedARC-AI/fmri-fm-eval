@@ -126,7 +126,12 @@ MNI152_2MM_AFFINE = (
 def _ensure_mni152_2mm(img: nib.Nifti1Image, interpolation: str = "linear"):
     if img.shape[:3] != MNI152_2MM_SHAPE:
         img = resample_img(
-            img, MNI152_2MM_AFFINE, MNI152_2MM_SHAPE, interpolation=interpolation, copy_header=True
+            img,
+            target_affine=np.array(MNI152_2MM_AFFINE),
+            target_shape=MNI152_2MM_SHAPE,
+            interpolation=interpolation,
+            force_resample=True,
+            copy_header=True,
         )
     return img
 
