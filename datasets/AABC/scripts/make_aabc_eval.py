@@ -33,15 +33,16 @@ _logger = logging.getLogger(__name__)
 ROOT = Path(__file__).parents[1]
 AABC_ROOT = Path(os.getenv("AABC_ROOT", "/teamspace/studios/this_studio/AABC_data"))
 
-# Evaluation set uses batches 17-19 (3 batches, similar size to HCPYA ~653 samples)
-# Batches 0-16 are reserved for pretraining
-# Train: batch 17 (1 batch, ~62 subjects, 33% of eval)
-# Val: batch 18 (1 batch, ~64 subjects, 34% of eval)
-# Test: batch 19 (1 batch, ~64 subjects, 33% of eval)
-SUB_BATCH_SPLITS = {
-    "train": [17],
-    "validation": [18],
-    "test": [19],
+# Evaluation pool uses batches 14-19, then split 70/15/15
+# Batches 0-13 are reserved for pretraining
+EVAL_BATCHES = list(range(14, 20))
+SPLIT_SEED = 2912
+
+# Split ratios (train/val/test)
+SPLIT_RATIOS = {
+    "train": 0.70,
+    "validation": 0.15,
+    "test": 0.15,
 }
 
 # AABC TR (constant across all tasks)
@@ -99,26 +100,36 @@ def main(args):
 
     _logger.info("Found %d subjects with visits", len(subject_visits))
 
-    # Construct sample list for each split (all tasks, with windowing)
-    sample_splits = {}
-    for split, batch_ids in SUB_BATCH_SPLITS.items():
-        samples = []
-        for batch_id in batch_ids:
-            for sub in sub_batch_splits[f"batch-{batch_id:02d}"]:
-                for visit in subject_visits.get(sub, []):
-                    for task, (task_dir, suffix, window_size, max_windows) in TASK_CONFIG.items():
-                        path = f"{sub}_{visit}_MR/MNINonLinear/Results/{task_dir}/{suffix}"
-                        fullpath = AABC_ROOT / path
-                        if fullpath.exists():
-                            # Create samples for each window
-                            for segment in range(max_windows):
-                                samples.append({
-                                    "path": path,
-                                    "task": task,
-                                    "window_size": window_size,
-                                    "segment": segment,
-                                })
-        sample_splits[split] = samples
+    # Construct pooled sample list (all tasks, with windowing)
+    pooled_samples = []
+    for batch_id in EVAL_BATCHES:
+        for sub in sub_batch_splits[f"batch-{batch_id:02d}"]:
+            for visit in subject_visits.get(sub, []):
+                for task, (task_dir, suffix, window_size, max_windows) in TASK_CONFIG.items():
+                    path = f"{sub}_{visit}_MR/MNINonLinear/Results/{task_dir}/{suffix}"
+                    fullpath = AABC_ROOT / path
+                    if fullpath.exists():
+                        # Create samples for each window
+                        for segment in range(max_windows):
+                            pooled_samples.append({
+                                "path": path,
+                                "task": task,
+                                "window_size": window_size,
+                                "segment": segment,
+                            })
+    _logger.info("Num pooled samples: %d", len(pooled_samples))
+
+    rng = np.random.default_rng(SPLIT_SEED)
+    rng.shuffle(pooled_samples)
+    n_total = len(pooled_samples)
+    n_train = int(n_total * SPLIT_RATIOS["train"])
+    n_val = int(n_total * SPLIT_RATIOS["validation"])
+    sample_splits = {
+        "train": pooled_samples[:n_train],
+        "validation": pooled_samples[n_train:n_train + n_val],
+        "test": pooled_samples[n_train + n_val:],
+    }
+    for split, samples in sample_splits.items():
         _logger.info("Num samples (%s): %d", split, len(samples))
 
     # Count tasks per split
