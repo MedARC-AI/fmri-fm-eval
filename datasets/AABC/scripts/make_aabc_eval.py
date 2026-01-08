@@ -1,11 +1,9 @@
-"""Create AABC evaluation dataset with all tasks (Arrow format).
+"""Create AABC evaluation dataset with REST only (Arrow format).
 
-This script creates HuggingFace Arrow datasets containing all fMRI tasks:
+This script creates HuggingFace Arrow datasets containing REST fMRI only:
 - REST: 1912 TRs -> windowed to 3 x 500 TR segments
-- CARIT: 290 TRs -> native length
-- FACENAME: 335 TRs -> native length
-- VISMOTOR: 184 TRs -> native length
 
+Using REST-only matches HCPYA eval (rest1lr) and ensures consistent sample sizes.
 Supports all parcellations: schaefer400, schaefer400_tians3, flat, a424, mni
 Follows the same pattern as HCP-YA evaluation datasets.
 """
@@ -50,13 +48,9 @@ SUB_BATCH_SPLITS = {
 AABC_TR = 0.72
 
 # Task configurations: (directory_name, file_suffix, window_size, max_windows)
-# For REST: window into 500-TR segments (up to 3 windows from 1912 TRs)
-# For tasks: use native length (1 window)
+# REST only: window into 500-TR segments (up to 3 windows from 1912 TRs)
 TASK_CONFIG = {
     "REST": ("rfMRI_REST", "rfMRI_REST_Atlas_MSMAll_hp0_clean_rclean_tclean.dtseries.nii", 500, 3),
-    "CARIT": ("tfMRI_CARIT_PA", "tfMRI_CARIT_PA_Atlas_MSMAll_hp0_clean_rclean_tclean.dtseries.nii", 290, 1),
-    "FACENAME": ("tfMRI_FACENAME_PA", "tfMRI_FACENAME_PA_Atlas_MSMAll_hp0_clean_rclean_tclean.dtseries.nii", 335, 1),
-    "VISMOTOR": ("tfMRI_VISMOTOR_PA", "tfMRI_VISMOTOR_PA_Atlas_MSMAll_hp0_clean_rclean_tclean.dtseries.nii", 184, 1),
 }
 
 

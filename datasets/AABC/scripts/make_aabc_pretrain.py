@@ -1,11 +1,9 @@
-"""Create AABC pretraining dataset with all tasks (WebDataset TAR format).
+"""Create AABC pretraining dataset with REST only (WebDataset TAR format).
 
-This script creates WebDataset TARs containing all fMRI tasks:
-- REST: 1912 TRs -> windowed to 3 x 500 TR segments
-- CARIT: 290 TRs -> native length
-- FACENAME: 335 TRs -> native length
-- VISMOTOR: 184 TRs -> native length
+This script creates WebDataset TARs containing REST fMRI only:
+- REST: 1912 TRs -> windowed to 3 x 500 TR segments (3 independent samples per subject)
 
+Using REST-only ensures consistent sample sizes for pretraining.
 Follows the same pattern as HCP-YA pretraining datasets.
 """
 import argparse
@@ -40,13 +38,9 @@ PRETRAIN_BATCHES = list(range(0, 17))
 AABC_TR = 0.72
 
 # Task configurations: (directory_name, file_suffix, window_size, max_windows)
-# For REST: window into 500-TR segments (up to 3 windows from 1912 TRs)
-# For tasks: use native length (1 window)
+# REST only: window into 500-TR segments (3 independent samples per subject)
 TASK_CONFIG = {
     "REST": ("rfMRI_REST", "rfMRI_REST_Atlas_MSMAll_hp0_clean_rclean_tclean.dtseries.nii", 500, 3),
-    "CARIT": ("tfMRI_CARIT_PA", "tfMRI_CARIT_PA_Atlas_MSMAll_hp0_clean_rclean_tclean.dtseries.nii", 290, 1),
-    "FACENAME": ("tfMRI_FACENAME_PA", "tfMRI_FACENAME_PA_Atlas_MSMAll_hp0_clean_rclean_tclean.dtseries.nii", 335, 1),
-    "VISMOTOR": ("tfMRI_VISMOTOR_PA", "tfMRI_VISMOTOR_PA_Atlas_MSMAll_hp0_clean_rclean_tclean.dtseries.nii", 184, 1),
 }
 
 DEFAULT_SHARD_SIZE_MB = 700
