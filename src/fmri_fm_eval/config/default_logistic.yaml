@@ -1,0 +1,48 @@
+# Root output directory
+# Individual eval runs will be saved as:
+#
+#   output_root/{name_prefix}/{model}/{representation}/{dataset}
+output_root: output
+name_prefix: logistic_eval
+
+# Remote root for backing up results
+# currently only S3 supported
+remote_root: null
+
+# Description of the run. Goes in wandb notes.
+notes: null
+
+# Model and dataset extra kwargs
+model_kwargs: {}
+dataset_kwargs: {}
+
+# Data loader
+num_workers: 8
+prefetch_factor: 8
+batch_size: 64
+
+# LogisticRegressionCV settings
+cv_folds: 5
+max_iter: 1000
+Cs: 10  # number of regularization values to try (log-spaced)
+# use class_weight='balanced' for imbalanced classes
+balanced_sampling: false
+
+# scoring metrics
+metrics:
+- acc
+- f1
+
+# metric for CV selection (passed to LogisticRegressionCV scoring)
+cv_metric: f1
+
+amp: true
+
+device: cuda
+
+seed: 4466
+debug: false
+
+wandb: true
+wandb_entity: null
+wandb_project: fMRI-fm-eval
