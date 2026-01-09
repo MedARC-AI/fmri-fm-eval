@@ -3,44 +3,35 @@
     "na_count": 51,
     "subjects_total": 1248,
     "bins": [
-        32.0,
-        35.0,
-        39.0
+        33.0,
+        38.0
     ],
     "label_counts": [
-        356,
-        247,
-        334,
-        260
+        428,
+        427,
+        342
     ],
-    "num_bins": 4,
+    "num_bins": 3,
     "bin_stats": [
         {
             "bin": 0,
-            "count": 356,
-            "fraction": 0.2974,
+            "count": 428,
+            "fraction": 0.3576,
             "min": 15.0,
-            "max": 32.0
+            "max": 33.0
         },
         {
             "bin": 1,
-            "count": 247,
-            "fraction": 0.2063,
-            "min": 33.0,
-            "max": 35.0
+            "count": 427,
+            "fraction": 0.3567,
+            "min": 34.0,
+            "max": 38.0
         },
         {
             "bin": 2,
-            "count": 334,
-            "fraction": 0.279,
-            "min": 36.0,
-            "max": 39.0
-        },
-        {
-            "bin": 3,
-            "count": 260,
-            "fraction": 0.2172,
-            "min": 40.0,
+            "count": 342,
+            "fraction": 0.2857,
+            "min": 39.0,
             "max": 48.0
         }
     ]

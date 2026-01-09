@@ -21,16 +21,6 @@ AABC_TARGET_MAP_DICT = {
     "fluid_iq": "aabc_target_map_FluidIQ_Tr35_60y.json",
     "cryst_iq": "aabc_target_map_CrystIQ_Tr35_60y.json",
     "memory": "aabc_target_map_Memory_Tr35_60y.json",
-    # RAVLT Memory
-    "ravlt_immediate": "aabc_target_map_ravlt_immediate_recall.json",
-    "ravlt_delay": "aabc_target_map_ravlt_delay_completion.json",
-    "ravlt_learning": "aabc_target_map_ravlt_learning_score.json",
-    # Executive Function
-    "dccs": "aabc_target_map_tlbx_dccs_uncorrected_standard_score.json",
-    "flanker": "aabc_target_map_tlbx_fica_uncorrected_standard_score.json",
-    # Motor Function
-    "grip": "aabc_target_map_tlbx_grip_uncorrected_standard_scores_dominant.json",
-    "walk": "aabc_target_map_tlbx_walk_2_uncorrected_standard_score.json",
 }
 
 
@@ -102,40 +92,3 @@ def aabc_cryst_iq(space: str, **kwargs):
 def aabc_memory(space: str, **kwargs):
     return _create_aabc(space, target="memory", **kwargs)
 
-
-# RAVLT Memory
-@register_dataset
-def aabc_ravlt_immediate(space: str, **kwargs):
-    return _create_aabc(space, target="ravlt_immediate", **kwargs)
-
-
-@register_dataset
-def aabc_ravlt_delay(space: str, **kwargs):
-    return _create_aabc(space, target="ravlt_delay", **kwargs)
-
-
-@register_dataset
-def aabc_ravlt_learning(space: str, **kwargs):
-    return _create_aabc(space, target="ravlt_learning", **kwargs)
-
-
-# Executive Function
-@register_dataset
-def aabc_dccs(space: str, **kwargs):
-    return _create_aabc(space, target="dccs", **kwargs)
-
-
-@register_dataset
-def aabc_flanker(space: str, **kwargs):
-    return _create_aabc(space, target="flanker", **kwargs)
-
-
-# Motor Function
-@register_dataset
-def aabc_grip(space: str, **kwargs):
-    return _create_aabc(space, target="grip", **kwargs)
-
-
-@register_dataset
-def aabc_walk(space: str, **kwargs):
-    return _create_aabc(space, target="walk", **kwargs)

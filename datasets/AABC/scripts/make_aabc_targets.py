@@ -30,6 +30,17 @@ PRIMARY_BINS = 4
 FALLBACK_BINS = 3
 MIN_BIN_FRACTION = 0.20
 
+# Per-target bin overrides (use exact bin count, skip balance rule)
+BIN_OVERRIDES = {
+    "age_open": 4,
+    "Memory_Tr35_60y": 4,
+    "FluidIQ_Tr35_60y": 4,
+    "CrystIQ_Tr35_60y": 4,
+    "neo_o": 3,
+    "neo_a": 3,
+    "neo_c": 3,
+}
+
 # Phenotypic/Cognitive targets
 #
 # Demographics:
@@ -166,7 +177,12 @@ def main():
             }
         else:
             numeric = series.astype(float)
-            targets, bins, counts, num_bins = quantize_with_balance(numeric)
+            override_bins = BIN_OVERRIDES.get(target)
+            if override_bins is not None:
+                targets, bins, counts = quantize(numeric, num_bins=override_bins)
+                num_bins = override_bins
+            else:
+                targets, bins, counts, num_bins = quantize_with_balance(numeric)
             bin_stats = build_bin_stats(numeric, targets, num_bins)
             info = {
                 "target": target,
