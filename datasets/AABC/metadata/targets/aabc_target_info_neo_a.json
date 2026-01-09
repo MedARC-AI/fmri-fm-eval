@@ -1,0 +1,47 @@
+{
+    "target": "neo_a",
+    "na_count": 51,
+    "subjects_total": 1248,
+    "bins": [
+        32.0,
+        35.0,
+        39.0
+    ],
+    "label_counts": [
+        356,
+        247,
+        334,
+        260
+    ],
+    "num_bins": 4,
+    "bin_stats": [
+        {
+            "bin": 0,
+            "count": 356,
+            "fraction": 0.2974,
+            "min": 15.0,
+            "max": 32.0
+        },
+        {
+            "bin": 1,
+            "count": 247,
+            "fraction": 0.2063,
+            "min": 33.0,
+            "max": 35.0
+        },
+        {
+            "bin": 2,
+            "count": 334,
+            "fraction": 0.279,
+            "min": 36.0,
+            "max": 39.0
+        },
+        {
+            "bin": 3,
+            "count": 260,
+            "fraction": 0.2172,
+            "min": 40.0,
+            "max": 48.0
+        }
+    ]
+}

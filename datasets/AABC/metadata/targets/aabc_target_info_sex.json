@@ -1,6 +1,7 @@
 {
     "target": "sex",
     "na_count": 0,
+    "subjects_total": 1248,
     "classes": [
         "F",
         "M"

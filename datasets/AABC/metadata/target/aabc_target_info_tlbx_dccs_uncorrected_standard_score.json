@@ -1,9 +1,0 @@
-{
-    "target": "tlbx_dccs_uncorrected_standard_score",
-    "na_count": 31,
-    "min": 51.0,
-    "max": 120.0,
-    "mean": 101.76992604765817,
-    "median": 103.0,
-    "std": 9.944483200719628
-}

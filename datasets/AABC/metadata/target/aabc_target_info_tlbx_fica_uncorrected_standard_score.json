@@ -1,9 +1,0 @@
-{
-    "target": "tlbx_fica_uncorrected_standard_score",
-    "na_count": 32,
-    "min": 57.0,
-    "max": 117.0,
-    "mean": 95.43996710526316,
-    "median": 96.0,
-    "std": 9.124363334176326
-}

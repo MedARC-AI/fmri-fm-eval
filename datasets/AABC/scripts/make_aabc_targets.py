@@ -3,6 +3,7 @@ import logging
 import os
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 logging.basicConfig(
@@ -24,6 +25,11 @@ GENDER_MAP = {
 }
 GENDER_CLASSES = ["F", "M"]
 
+# quantile binning with balance check
+PRIMARY_BINS = 4
+FALLBACK_BINS = 3
+MIN_BIN_FRACTION = 0.20
+
 # Phenotypic/Cognitive targets
 #
 # Demographics:
@@ -34,20 +40,6 @@ GENDER_CLASSES = ["F", "M"]
 # - Memory_Tr35_60y: Memory composite score
 # - FluidIQ_Tr35_60y: Fluid intelligence composite
 # - CrystIQ_Tr35_60y: Crystallized intelligence composite
-#
-# Task-Specific Predictions:
-# CARIT (Executive Function):
-# - tlbx_dccs_uncorrected_standard_score: Dimensional Change Card Sort
-# - tlbx_fica_uncorrected_standard_score: Flanker Inhibitory Control
-#
-# FACENAME (Memory):
-# - ravlt_immediate_recall: RAVLT immediate recall
-# - ravlt_delay_completion: RAVLT delayed recall
-# - ravlt_learning_score: RAVLT learning slope
-#
-# VISMOTOR (Motor):
-# - tlbx_grip_uncorrected_standard_scores_dominant: Grip strength (dominant hand)
-# - tlbx_walk_2_uncorrected_standard_score: Walking speed
 #
 # Personality (NEO-FFI Big Five):
 # - neo_n: Neuroticism
@@ -64,16 +56,6 @@ TARGETS = [
     "Memory_Tr35_60y",
     "FluidIQ_Tr35_60y",
     "CrystIQ_Tr35_60y",
-    # CARIT task (Executive Function)
-    "tlbx_dccs_uncorrected_standard_score",
-    "tlbx_fica_uncorrected_standard_score",
-    # FACENAME task (Memory)
-    "ravlt_immediate_recall",
-    "ravlt_delay_completion",
-    "ravlt_learning_score",
-    # VISMOTOR task (Motor)
-    "tlbx_grip_uncorrected_standard_scores_dominant",
-    "tlbx_walk_2_uncorrected_standard_score",
     # NEO-FFI Personality
     "neo_n",
     "neo_e",
@@ -81,6 +63,61 @@ TARGETS = [
     "neo_a",
     "neo_c",
 ]
+
+
+def get_rest_subjects(aabc_root: Path) -> set[str]:
+    subjects = set()
+    for path in aabc_root.rglob("rfMRI_REST_*_tclean*"):
+        if not path.is_file():
+            continue
+        subject_visit_dir = path.parents[3].name
+        parts = subject_visit_dir.split("_")
+        if parts:
+            subjects.add(parts[0])
+    return subjects
+
+
+def quantize(series: pd.Series, num_bins: int):
+    values = series.values
+
+    qs = np.arange(1, num_bins) / num_bins
+    bins = np.nanquantile(values, qs)
+    bins = np.round(bins, 3).tolist()
+
+    # right=True produces more balanced splits, and is consistent with pandas qcut
+    targets = np.digitize(values, bins, right=True)
+    targets = pd.Series(targets, index=series.index)
+    counts = np.bincount(targets, minlength=num_bins)
+    return targets, bins, counts
+
+
+def quantize_with_balance(series: pd.Series):
+    targets, bins, counts = quantize(series, num_bins=PRIMARY_BINS)
+    total = counts.sum()
+    if total == 0 or (counts / total).min() < MIN_BIN_FRACTION:
+        targets, bins, counts = quantize(series, num_bins=FALLBACK_BINS)
+        num_bins = FALLBACK_BINS
+    else:
+        num_bins = PRIMARY_BINS
+    return targets, bins, counts, num_bins
+
+
+def build_bin_stats(values: pd.Series, labels: pd.Series, num_bins: int):
+    stats = []
+    total = int(values.shape[0])
+    for bin_idx in range(num_bins):
+        bin_vals = values[labels == bin_idx]
+        count = int(bin_vals.shape[0])
+        stats.append(
+            {
+                "bin": bin_idx,
+                "count": count,
+                "fraction": round(count / total, 4) if total else 0.0,
+                "min": float(bin_vals.min()) if count else None,
+                "max": float(bin_vals.max()) if count else None,
+            }
+        )
+    return stats
 
 
 def main():
@@ -100,6 +137,12 @@ def main():
     df = df.drop_duplicates(subset="sub", keep="first")
     df = df.set_index("sub")
 
+    rest_subjects = get_rest_subjects(AABC_ROOT)
+    if not rest_subjects:
+        _logger.warning("No REST subjects found under %s; targets will be empty.", AABC_ROOT)
+    df = df.loc[df.index.intersection(rest_subjects)]
+    _logger.info("REST subjects in CSV: %d", len(df))
+
     outdir = ROOT / "metadata/targets"
     outdir.mkdir(exist_ok=True, parents=True)
 
@@ -117,19 +160,22 @@ def main():
             info = {
                 "target": target,
                 "na_count": na_count,
+                "subjects_total": int(df.shape[0]),
                 "classes": GENDER_CLASSES,
                 "label_counts": counts,
             }
         else:
-            targets = series.astype(float)
+            numeric = series.astype(float)
+            targets, bins, counts, num_bins = quantize_with_balance(numeric)
+            bin_stats = build_bin_stats(numeric, targets, num_bins)
             info = {
                 "target": target,
                 "na_count": na_count,
-                "min": float(targets.min()),
-                "max": float(targets.max()),
-                "mean": float(targets.mean()),
-                "median": float(targets.median()),
-                "std": float(targets.std()),
+                "subjects_total": int(df.shape[0]),
+                "bins": bins,
+                "label_counts": counts.tolist(),
+                "num_bins": num_bins,
+                "bin_stats": bin_stats,
             }
 
         targets = targets.to_dict()

@@ -1,9 +1,0 @@
-{
-    "target": "tlbx_walk_2_uncorrected_standard_score",
-    "na_count": 129,
-    "min": 30.0,
-    "max": 140.0,
-    "mean": 97.17962466487936,
-    "median": 98.0,
-    "std": 14.190969924856878
-}

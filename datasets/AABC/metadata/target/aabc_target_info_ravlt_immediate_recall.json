@@ -1,9 +1,0 @@
-{
-    "target": "ravlt_immediate_recall",
-    "na_count": 32,
-    "min": 0.0,
-    "max": 74.0,
-    "mean": 44.389802631578945,
-    "median": 44.0,
-    "std": 10.428168309056064
-}

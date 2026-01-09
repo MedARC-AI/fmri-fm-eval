@@ -1,0 +1,47 @@
+{
+    "target": "age_open",
+    "na_count": 45,
+    "subjects_total": 1248,
+    "bins": [
+        47.5,
+        60.0,
+        74.0
+    ],
+    "label_counts": [
+        301,
+        316,
+        297,
+        289
+    ],
+    "num_bins": 4,
+    "bin_stats": [
+        {
+            "bin": 0,
+            "count": 301,
+            "fraction": 0.2502,
+            "min": 36.0,
+            "max": 47.0
+        },
+        {
+            "bin": 1,
+            "count": 316,
+            "fraction": 0.2627,
+            "min": 48.0,
+            "max": 60.0
+        },
+        {
+            "bin": 2,
+            "count": 297,
+            "fraction": 0.2469,
+            "min": 61.0,
+            "max": 74.0
+        },
+        {
+            "bin": 3,
+            "count": 289,
+            "fraction": 0.2402,
+            "min": 75.0,
+            "max": 89.0
+        }
+    ]
+}
