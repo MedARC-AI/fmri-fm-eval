@@ -1,7 +1,7 @@
 """Create AABC evaluation dataset with REST only (Arrow format).
 
 This script creates HuggingFace Arrow datasets containing REST fMRI only:
-- REST: 1912 TRs -> windowed to 3 x 500 TR segments
+- REST: 1912 TRs -> single 500 TR window per subject
 
 Using REST-only matches HCPYA eval (rest1lr) and ensures consistent sample sizes.
 Supports all parcellations: schaefer400, schaefer400_tians3, flat, a424, mni
@@ -33,25 +33,26 @@ _logger = logging.getLogger(__name__)
 ROOT = Path(__file__).parents[1]
 AABC_ROOT = Path(os.getenv("AABC_ROOT", "/teamspace/studios/this_studio/AABC_data"))
 
-# Evaluation pool uses batches 18-19, then split 70/15/15
-# Batches 0-17 are reserved for pretraining
-EVAL_BATCHES = [18, 19]
+# Evaluation pool uses batches 10-19 (10 batches), then split 80/10/10
+# Uses only 1 visit per subject (randomly selected) to maintain data quantity
+# Batches 0-9 are reserved for pretraining
+EVAL_BATCHES = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
 SPLIT_SEED = 2912
 
 # Split ratios (train/val/test)
 SPLIT_RATIOS = {
-    "train": 0.70,
-    "validation": 0.15,
-    "test": 0.15,
+    "train": 0.80,
+    "validation": 0.10,
+    "test": 0.10,
 }
 
 # AABC TR (constant across all tasks)
 AABC_TR = 0.72
 
 # Task configurations: (directory_name, file_suffix, window_size, max_windows)
-# REST only: window into 500-TR segments (up to 3 windows from 1912 TRs)
+# REST only: single 500-TR window per subject (no multiple windows)
 TASK_CONFIG = {
-    "REST": ("rfMRI_REST", "rfMRI_REST_Atlas_MSMAll_hp0_clean_rclean_tclean.dtseries.nii", 500, 3),
+    "REST": ("rfMRI_REST", "rfMRI_REST_Atlas_MSMAll_hp0_clean_rclean_tclean.dtseries.nii", 500, 1),
 }
 
 
@@ -101,34 +102,101 @@ def main(args):
     _logger.info("Found %d subjects with visits", len(subject_visits))
 
     # Construct pooled sample list (all tasks, with windowing)
-    pooled_samples = []
+    # Important: Use only ONE visit per subject for eval to avoid data leakage
+    rng = np.random.default_rng(SPLIT_SEED)
+    samples_by_batch = {batch_id: [] for batch_id in EVAL_BATCHES}
+
     for batch_id in EVAL_BATCHES:
         for sub in sub_batch_splits[f"batch-{batch_id:02d}"]:
-            for visit in subject_visits.get(sub, []):
-                for task, (task_dir, suffix, window_size, max_windows) in TASK_CONFIG.items():
-                    path = f"{sub}_{visit}_MR/MNINonLinear/Results/{task_dir}/{suffix}"
-                    fullpath = AABC_ROOT / path
-                    if fullpath.exists():
-                        # Create samples for each window
-                        for segment in range(max_windows):
-                            pooled_samples.append({
-                                "path": path,
-                                "task": task,
-                                "window_size": window_size,
-                                "segment": segment,
-                            })
-    _logger.info("Num pooled samples: %d", len(pooled_samples))
+            visits = subject_visits.get(sub, [])
+            if not visits:
+                continue
+            # Randomly select ONE visit per subject (deterministic due to fixed seed)
+            selected_visit = rng.choice(visits)
+            for task, (task_dir, suffix, window_size, max_windows) in TASK_CONFIG.items():
+                path = f"{sub}_{selected_visit}_MR/MNINonLinear/Results/{task_dir}/{suffix}"
+                fullpath = AABC_ROOT / path
+                if fullpath.exists():
+                    # Create samples for each window
+                    for segment in range(max_windows):
+                        samples_by_batch[batch_id].append({
+                            "path": path,
+                            "task": task,
+                            "window_size": window_size,
+                            "segment": segment,
+                            "sub": sub,  # Track subject for stratification
+                        })
 
-    rng = np.random.default_rng(SPLIT_SEED)
-    rng.shuffle(pooled_samples)
-    n_total = len(pooled_samples)
-    n_train = int(n_total * SPLIT_RATIOS["train"])
-    n_val = int(n_total * SPLIT_RATIOS["validation"])
-    sample_splits = {
-        "train": pooled_samples[:n_train],
-        "validation": pooled_samples[n_train:n_train + n_val],
-        "test": pooled_samples[n_train + n_val:],
-    }
+    n_total = sum(len(samples) for samples in samples_by_batch.values())
+    _logger.info("Num pooled samples (1 visit per subject): %d", n_total)
+
+    # Load metadata for stratified splitting
+    metadata_dir = ROOT / "metadata/targets"
+    target_maps = {}
+    target_files = ["age_open", "sex", "FluidIQ_Tr35_60y"]
+
+    for target in target_files:
+        target_path = metadata_dir / f"aabc_target_map_{target}.json"
+        if target_path.exists():
+            with target_path.open() as f:
+                target_maps[target] = json.load(f)
+
+    # Combine all samples
+    all_samples = []
+    for batch_samples in samples_by_batch.values():
+        all_samples.extend(batch_samples)
+
+    # Stratified split by age + sex + FluidIQ to ensure balanced metadata distribution
+    samples_by_strata = {}
+    for sample in all_samples:
+        sub = sample["sub"]
+
+        # Get metadata bins
+        age_bin = target_maps.get("age_open", {}).get(sub, -1)
+        sex = target_maps.get("sex", {}).get(sub, -1)
+        fluid_bin = target_maps.get("FluidIQ_Tr35_60y", {}).get(sub, -1)
+
+        # Create composite strata key
+        strata_key = f"age{age_bin}_sex{sex}_fluid{fluid_bin}"
+
+        if strata_key not in samples_by_strata:
+            samples_by_strata[strata_key] = []
+        samples_by_strata[strata_key].append(sample)
+
+    _logger.info("Stratification: Created %d strata", len(samples_by_strata))
+
+    # Stratified split: split each stratum proportionally
+    sample_splits = {"train": [], "validation": [], "test": []}
+
+    for strata_key, strata_samples in samples_by_strata.items():
+        # Shuffle samples within stratum
+        rng.shuffle(strata_samples)
+        n_strata = len(strata_samples)
+
+        # For very small strata (< 10 samples), use simpler split
+        if n_strata < 10:
+            # Put most in train, 1 in val if possible, 1 in test if possible
+            if n_strata >= 3:
+                sample_splits["validation"].append(strata_samples[0])
+                sample_splits["test"].append(strata_samples[1])
+                sample_splits["train"].extend(strata_samples[2:])
+            elif n_strata == 2:
+                sample_splits["validation"].append(strata_samples[0])
+                sample_splits["train"].append(strata_samples[1])
+            else:
+                sample_splits["train"].extend(strata_samples)
+        else:
+            # For larger strata, do proper 80/10/10 split
+            n_val = int(n_strata * SPLIT_RATIOS["validation"])
+            n_test = int(n_strata * SPLIT_RATIOS["test"])
+
+            sample_splits["validation"].extend(strata_samples[:n_val])
+            sample_splits["test"].extend(strata_samples[n_val:n_val + n_test])
+            sample_splits["train"].extend(strata_samples[n_val + n_test:])
+
+    # Shuffle within each split
+    for split in sample_splits:
+        rng.shuffle(sample_splits[split])
     for split, samples in sample_splits.items():
         _logger.info("Num samples (%s): %d", split, len(samples))
 
@@ -139,6 +207,91 @@ def main(args):
             task = s["task"]
             task_counts[task] = task_counts.get(task, 0) + 1
         _logger.info("  %s task breakdown: %s", split, task_counts)
+
+    # Load and verify metadata distribution across splits
+    _logger.info("\n" + "="*80)
+    _logger.info("METADATA DISTRIBUTION ACROSS SPLITS")
+    _logger.info("="*80)
+
+    # Load all target maps
+    target_maps = {}
+    metadata_dir = ROOT / "metadata/targets"
+    target_files = [
+        "age_open", "sex", "Memory_Tr35_60y", "FluidIQ_Tr35_60y",
+        "CrystIQ_Tr35_60y", "neo_n", "neo_e", "neo_o", "neo_a", "neo_c"
+    ]
+
+    for target in target_files:
+        target_path = metadata_dir / f"aabc_target_map_{target}.json"
+        if target_path.exists():
+            with target_path.open() as f:
+                target_maps[target] = json.load(f)
+
+    if target_maps:
+        # Extract subjects from each split
+        split_subjects = {}
+        for split, samples in sample_splits.items():
+            subjects = set()
+            for s in samples:
+                # Extract subject from path (e.g., "HCA6000030_V1_MR/..." -> "HCA6000030")
+                path_parts = s["path"].split("_")
+                if path_parts:
+                    subjects.add(path_parts[0])
+            split_subjects[split] = subjects
+
+        # Compute and display distributions
+        for target, target_data in target_maps.items():
+            _logger.info(f"\n{target.upper()}:")
+
+            # Load target info for context
+            info_path = metadata_dir / f"aabc_target_info_{target}.json"
+            target_info = {}
+            if info_path.exists():
+                with info_path.open() as f:
+                    target_info = json.load(f)
+
+            for split, subjects in split_subjects.items():
+                # Get target values for subjects in this split
+                values = []
+                for sub in subjects:
+                    if sub in target_data:
+                        values.append(target_data[sub])
+
+                if not values:
+                    _logger.info(f"  {split}: No data")
+                    continue
+
+                # Compute statistics based on target type
+                if target == "sex":
+                    # Binary classification
+                    counts = {0: 0, 1: 0}  # F=0, M=1
+                    for v in values:
+                        counts[v] = counts.get(v, 0) + 1
+                    total = len(values)
+                    _logger.info(
+                        f"  {split}: n={total}, F={counts[0]} ({100*counts[0]/total:.1f}%), "
+                        f"M={counts[1]} ({100*counts[1]/total:.1f}%)"
+                    )
+                else:
+                    # Continuous/binned targets
+                    values_array = np.array(values)
+                    if "bins" in target_info:
+                        # Show bin distribution
+                        bins = target_info["bins"]
+                        bin_counts = np.bincount(values_array, minlength=len(bins)+1)
+                        bin_pcts = [f"{100*c/len(values):.1f}%" for c in bin_counts]
+                        _logger.info(
+                            f"  {split}: n={len(values)}, bins={bin_counts.tolist()}, "
+                            f"pcts={bin_pcts}"
+                        )
+                    else:
+                        _logger.info(
+                            f"  {split}: n={len(values)}, dist={np.bincount(values_array).tolist()}"
+                        )
+
+        _logger.info("\n" + "="*80)
+    else:
+        _logger.warning("No target metadata found at %s", metadata_dir)
 
     # Load reader for target space
     if args.space == "a424":

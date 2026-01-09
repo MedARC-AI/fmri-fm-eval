@@ -30,9 +30,9 @@ _logger = logging.getLogger(__name__)
 ROOT = Path(__file__).parents[1]
 AABC_ROOT = Path("/teamspace/studios/this_studio/AABC_data")
 
-# Pretraining uses batches 0-16 (17 batches, ~1060 subjects)
-# Batches 17-19 are reserved for evaluation
-PRETRAIN_BATCHES = list(range(0, 17))
+# Pretraining uses batches 0-9 (10 batches)
+# Batches 10-19 are reserved for evaluation
+PRETRAIN_BATCHES = list(range(0, 10))
 
 # AABC TR (constant across all tasks)
 AABC_TR = 0.72
