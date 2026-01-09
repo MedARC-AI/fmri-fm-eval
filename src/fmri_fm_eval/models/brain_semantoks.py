@@ -138,7 +138,6 @@ class BrainSemantoksWrapper(ModelWrapper):
     def __init__(self, encoder: nn.Module):
         super().__init__()
         self.encoder = encoder
-        self.encoder.eval()
 
     def forward(self, batch: dict) -> Embeddings:
         """
@@ -158,8 +157,7 @@ class BrainSemantoksWrapper(ModelWrapper):
 
         # Forward through encoder
         # The model uses mask to replace fully padded patches with learned mask embedding
-        with torch.no_grad():
-            output = self.encoder(x, atlas=0, mask=mask)
+        output = self.encoder(x, atlas=0, mask=mask)
 
         # Extract embeddings
         # output["global_cls"]: [B, D]
