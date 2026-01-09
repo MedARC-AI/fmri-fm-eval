@@ -15,7 +15,12 @@ logging.basicConfig(
 _logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).parents[1]
-AABC_ROOT = Path(os.getenv("AABC_ROOT", "/teamspace/studios/this_studio/AABC_data"))
+AABC_ROOT = os.getenv("AABC_ROOT")
+assert AABC_ROOT is not None, (
+    "AABC_ROOT environment variable is not set. "
+    "Please set it to the directory containing AABC raw data. "
+)
+AABC_ROOT = Path(AABC_ROOT)
 AABC_CSV_PATH = AABC_ROOT / "AABC_subjects_2026_01_03_14_21_56.csv"
 
 # Gender mapping (classification target)

@@ -28,8 +28,12 @@ logging.getLogger("nibabel").setLevel(logging.ERROR)
 _logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).parents[1]
-AABC_ROOT = Path("/teamspace/studios/this_studio/AABC_data")
-
+AABC_ROOT= os.getenv("AABC_ROOT")
+assert AABC_ROOT is not None, (
+    "AABC_ROOT environment variable is not set. "
+    "Please set it to the directory containing AABC raw data. "
+)
+AABC_ROOT = Path(AABC_ROOT)
 # Pretraining uses batches 0-9 (10 batches)
 # Batches 10-19 are reserved for evaluation
 PRETRAIN_BATCHES = list(range(0, 10))
@@ -125,75 +129,69 @@ def main(args):
     pattern = str(outdir / "aabc-%06d.tar")
     with wds.ShardWriter(pattern, maxsize=shard_size_bytes) as sink:
         for sample in all_samples:
-            try:
-                # Load CIFTI file
-                path = AABC_ROOT / sample["path"]
-                series = reader(path)
+            # Load CIFTI file
+            path = AABC_ROOT / sample["path"]
+            series = reader(path)
 
-                T, D = series.shape
-                assert D == dim, f"Expected dim {dim}, got {D}"
+            T, D = series.shape
+            assert D == dim, f"Expected dim {dim}, got {D}"
 
-                window_size = sample["window_size"]
-                segment = sample["segment"]
-                start = segment * window_size
-                end = start + window_size
+            window_size = sample["window_size"]
+            segment = sample["segment"]
+            start = segment * window_size
+            end = start + window_size
 
-                # Check if we have enough data for this segment
-                if end > T:
-                    if segment == 0:
-                        # For first segment, use what we have if it's close enough
-                        if T >= window_size * 0.9:
-                            end = T
-                            window_size = T
-                        else:
-                            _logger.warning(
-                                "Subject %s visit %s task %s has only %d TRs (< %d), skipping",
-                                sample["sub"], sample["visit"], sample["task"], T, window_size
-                            )
-                            total_skipped += 1
-                            continue
+            # Check if we have enough data for this segment
+            if end > T:
+                if segment == 0:
+                    # For first segment, use what we have if it's close enough
+                    if T >= window_size * 0.9:
+                        end = T
+                        window_size = T
                     else:
-                        # Skip additional segments that don't have enough data
+                        _logger.warning(
+                            "Subject %s visit %s task %s has only %d TRs (< %d), skipping",
+                            sample["sub"], sample["visit"], sample["task"], T, window_size
+                        )
+                        total_skipped += 1
                         continue
+                else:
+                    # Skip additional segments that don't have enough data
+                    continue
 
-                # Extract window
-                series_window = series[start:end]
+            # Extract window
+            series_window = series[start:end]
 
-                # Z-score normalization
-                series_window, mean, std = nisc.scale(series_window)
+            # Z-score normalization
+            series_window, mean, std = nisc.scale(series_window)
 
-                # Convert to float16 to save space
-                series_f16 = series_window.astype(np.float16)
+            # Convert to float16 to save space
+            series_f16 = series_window.astype(np.float16)
 
-                # Create sample key: {subject}_{visit}_{task}_{segment}
-                key = f"{sample['sub']}_{sample['visit']}_{sample['task']}_{segment}"
+            # Create sample key: {subject}_{visit}_{task}_{segment}
+            key = f"{sample['sub']}_{sample['visit']}_{sample['task']}_{segment}"
 
-                # Write to TAR
-                sink.write({
-                    "__key__": key,
-                    "npy": series_f16.tobytes(),
-                    "json": json.dumps({
-                        "sub": sample["sub"],
-                        "visit": sample["visit"],
-                        "task": sample["task"],
-                        "tr": AABC_TR,
-                        "n_frames": series_f16.shape[0],
-                        "dim": dim,
-                        "dtype": "float16",
-                        "shape": list(series_f16.shape),
-                        "mean": mean.squeeze().astype(np.float32).tolist(),
-                        "std": std.squeeze().astype(np.float32).tolist(),
-                        "segment": segment,
-                        "start": start,
-                        "end": end,
-                    }),
-                })
-                total_written += 1
-
-            except Exception as e:
-                _logger.error("Error processing %s: %s", sample["path"], e)
-                total_skipped += 1
-                continue
+            # Write to TAR
+            sink.write({
+                "__key__": key,
+                "npy": series_f16.tobytes(),
+                "json": json.dumps({
+                    "sub": sample["sub"],
+                    "visit": sample["visit"],
+                    "task": sample["task"],
+                    "tr": AABC_TR,
+                    "n_frames": series_f16.shape[0],
+                    "dim": dim,
+                    "dtype": "float16",
+                    "shape": list(series_f16.shape),
+                    "mean": mean.squeeze().astype(np.float32).tolist(),
+                    "std": std.squeeze().astype(np.float32).tolist(),
+                    "segment": segment,
+                    "start": start,
+                    "end": end,
+                }),
+            })
+            total_written += 1
 
     _logger.info("WebDataset TAR creation complete!")
     _logger.info("Total samples written: %d", total_written)

@@ -31,8 +31,12 @@ logging.getLogger("nibabel").setLevel(logging.ERROR)
 _logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).parents[1]
-AABC_ROOT = Path(os.getenv("AABC_ROOT", "/teamspace/studios/this_studio/AABC_data"))
-
+AABC_ROOT = os.getenv("AABC_ROOT")
+assert AABC_ROOT is not None, (
+    "AABC_ROOT environment variable is not set. "
+    "Please set it to the directory containing AABC raw data. "
+)
+AABC_ROOT = Path(AABC_ROOT)
 # Evaluation pool uses batches 10-19 (10 batches), then split 80/10/10
 # Uses only 1 visit per subject (randomly selected) to maintain data quantity
 # Batches 0-9 are reserved for pretraining
@@ -355,49 +359,44 @@ def generate_samples(samples: list[dict], *, reader, dim: int):
         fullpath = AABC_ROOT / path
         meta = parse_aabc_metadata(fullpath)
 
-        try:
-            series = reader(fullpath)
-            T, D = series.shape
-            assert D == dim, f"Expected dim {dim}, got {D} for {path}"
+        series = reader(fullpath)
+        T, D = series.shape
+        assert D == dim, f"Expected dim {dim}, got {D} for {path}"
 
-            start = segment * window_size
-            end = start + window_size
+        start = segment * window_size
+        end = start + window_size
 
-            # Check if we have enough data for this segment
-            if end > T:
-                if segment == 0:
-                    # For first segment, use what we have if it's close enough
-                    if T >= window_size * 0.9:
-                        end = T
-                    else:
-                        _logger.warning(
-                            "Path %s has fewer TRs than expected (%d < %d); skipping.",
-                            path, T, window_size
-                        )
-                        continue
+        # Check if we have enough data for this segment
+        if end > T:
+            if segment == 0:
+                # For first segment, use what we have if it's close enough
+                if T >= window_size * 0.9:
+                    end = T
                 else:
-                    # Skip additional segments that don't have enough data
+                    _logger.warning(
+                        "Path %s has fewer TRs than expected (%d < %d); skipping.",
+                        path, T, window_size
+                    )
                     continue
+            else:
+                # Skip additional segments that don't have enough data
+                continue
 
-            series_window = series[start:end]
-            series_window, mean, std = nisc.scale(series_window)
+        series_window = series[start:end]
+        series_window, mean, std = nisc.scale(series_window)
 
-            yield {
-                **meta,
-                "task": task,  # Use task from config, not parsed
-                "path": str(path),
-                "start": start,
-                "end": end,
-                "tr": AABC_TR,
-                "segment": segment,
-                "bold": series_window.astype(np.float16),
-                "mean": mean.astype(np.float32),
-                "std": std.astype(np.float32),
-            }
-
-        except Exception as e:
-            _logger.error("Error processing %s: %s", path, e)
-            continue
+        yield {
+            **meta,
+            "task": task,  # Use task from config, not parsed
+            "path": str(path),
+            "start": start,
+            "end": end,
+            "tr": AABC_TR,
+            "segment": segment,
+            "bold": series_window.astype(np.float16),
+            "mean": mean.astype(np.float32),
+            "std": std.astype(np.float32),
+        }
 
 
 def parse_aabc_metadata(path: Path) -> dict[str, str]:

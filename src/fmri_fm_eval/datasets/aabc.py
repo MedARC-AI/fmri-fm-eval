@@ -5,8 +5,13 @@ import datasets as hfds
 from fmri_fm_eval.datasets.base import HFDataset
 from fmri_fm_eval.datasets.registry import register_dataset
 
-AABC_ROOT = os.getenv("AABC_ROOT", "/teamspace/studios/this_studio/aabc-eval")
-
+AABC_ROOT = os.getenv("AABC_ROOT")
+assert AABC_ROOT is not None, (
+    "AABC_ROOT environment variable is not set. "
+    "Please set it to the directory containing AABC data. "
+    "Example: export AABC_ROOT=/path/to/aabc-eval"
+)
+AABC_ROOT = Path(AABC_ROOT)
 AABC_TARGET_MAP_DICT = {
     # Demographics
     "sex": "aabc_target_map_sex.json",
