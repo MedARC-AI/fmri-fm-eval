@@ -76,10 +76,4 @@ def hcpya_rest1lr_pmat24(space: str, **kwargs):
 
 @register_dataset
 def hcpya_task21(space: str, **kwargs):
-    return _create_hcpya(
-        "task21",
-        space,
-        target_key="cond",
-        target_id_map=HCPYA_TASK21_TRIAL_TYPES,
-        **kwargs,
-    )
+    return _create_hcpya("task21", space, target_key="cond_id", **kwargs)
