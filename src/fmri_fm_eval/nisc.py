@@ -172,6 +172,14 @@ def fetch_a424():
     return path
 
 
+def fetch_schaefer400_tians3_buckner7():
+    """Fetch combined Schaefer400 + Tian S3 + Buckner7 parcellation (457 ROIs)."""
+    base_url = "https://huggingface.co/SamGijsen/Brain-Semantoks/resolve/main"
+    filename = "schaefer400_tian50_buckner7_MNI152_2mm.nii.gz"
+    path = download_file(base_url, filename, cache_dir=PARC_CACHE_DIR)
+    return path
+
+
 def download_file(base_url: str, filename: str, cache_dir: str | Path) -> Path:
     url = f"{base_url}/{filename}"
     cache_dir = Path(cache_dir)
@@ -274,6 +282,13 @@ def parcel_average_schaefer_tian_fslr91k(num_rois: int, scale: int, **kwargs):
 
 def parcel_average_a424(**kwargs):
     path = fetch_a424()
+    parc = read_nifti_data(path)
+    parcavg = ParcelAverage(parc, **kwargs)
+    return parcavg
+
+
+def parcel_average_schaefer400_tians3_buckner7(**kwargs):
+    path = fetch_schaefer400_tians3_buckner7()
     parc = read_nifti_data(path)
     parcavg = ParcelAverage(parc, **kwargs)
     return parcavg
