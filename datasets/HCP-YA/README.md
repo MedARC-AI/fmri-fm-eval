@@ -126,6 +126,6 @@ args=
 
 for ds_dir in data/processed/*; do
     ds_name=${ds_dir##*/}
-    aws s3 sync $args $ds_dir s3://medarc/fmri-fm-eval/processed/${ds_name}
+    aws s3 sync $args $ds_dir s3://medarc/fmri-datasets/eval/${ds_name}
 done
 ```

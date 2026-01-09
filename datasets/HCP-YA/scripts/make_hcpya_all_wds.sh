@@ -14,7 +14,7 @@ roots=(
     s3://hcp-openaccess/HCP_1200
 )
 
-outdir="s3://medarc/fmri-fm-eval/processed"
+outdir="s3://medarc/fmri-datasets/pretrain"
 
 log_path="logs/make_hcpya_all_wds.log"
 
@@ -30,6 +30,6 @@ for ii in $spaceids; do
         --space "${space}" \
         --root "${root}" \
         --outdir "${outdir}" \
-        --shard-id {} ::: {0..1599} \
+        --shard-id {} ::: {0..1799} \
         2>&1 | tee -a "${log_path}"
 done

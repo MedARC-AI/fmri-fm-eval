@@ -5,7 +5,7 @@ import datasets as hfds
 from fmri_fm_eval.datasets.base import HFDataset
 from fmri_fm_eval.datasets.registry import register_dataset
 
-HCPYA_ROOT = os.getenv("HCPYA_ROOT", "s3://medarc/fmri-fm-eval/processed")
+HCPYA_ROOT = os.getenv("HCPYA_ROOT", "s3://medarc/fmri-datasets/eval")
 
 HCPYA_TASK21_TRIAL_TYPES = {
     "fear": 0,

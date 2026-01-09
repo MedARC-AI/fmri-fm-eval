@@ -63,7 +63,7 @@ def main(args):
 
     outdir = AnyPath(args.outdir or ROOT / "data/processed")
     outdir = outdir / f"hcpya-all.{args.space}.wds"
-    outpath = outdir / f"hcpya-all-{args.space}_{args.shard_id:05d}.tar"
+    outpath = outdir / f"hcpya-all-{args.space}-{args.shard_id:05d}.tar"
     _logger.info(
         "Generating dataset: %s (%04d/%d)",
         outdir.relative_to(outdir.parents[1]),

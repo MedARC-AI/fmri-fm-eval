@@ -7,7 +7,7 @@ import fsspec
 from fmri_fm_eval.datasets.base import HFDataset
 from fmri_fm_eval.datasets.registry import register_dataset
 
-ABIDE_ROOT = os.getenv("ABIDE_ROOT", "s3://medarc/fmri-fm-eval/processed")
+ABIDE_ROOT = os.getenv("ABIDE_ROOT", "s3://medarc/fmri-datasets/eval")
 
 ABIDE_TARGET_MAP_DICT = {
     "dx": "abide_target_map_dx.json",

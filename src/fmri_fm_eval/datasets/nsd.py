@@ -5,7 +5,7 @@ import datasets as hfds
 from fmri_fm_eval.datasets.base import HFDataset
 from fmri_fm_eval.datasets.registry import register_dataset
 
-NSD_ROOT = os.getenv("NSD_ROOT", "s3://medarc/fmri-fm-eval/processed")
+NSD_ROOT = os.getenv("NSD_ROOT", "s3://medarc/fmri-datasets/eval")
 
 
 @register_dataset
