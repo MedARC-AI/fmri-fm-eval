@@ -1,0 +1,501 @@
+PATNO,Diagnosis,Split
+101556,Healthy Control,test
+103542,Healthy Control,test
+160890,Healthy Control,test
+165043,Healthy Control,test
+178413,Healthy Control,test
+311019,Healthy Control,test
+395282,Healthy Control,test
+101175,Parkinson's Disease,test
+101735,Parkinson's Disease,test
+101841,Parkinson's Disease,test
+102305,Parkinson's Disease,test
+114195,Parkinson's Disease,test
+120544,Parkinson's Disease,test
+121830,Parkinson's Disease,test
+140568,Parkinson's Disease,test
+142879,Parkinson's Disease,test
+152582,Parkinson's Disease,test
+164268,Parkinson's Disease,test
+168299,Parkinson's Disease,test
+181704,Parkinson's Disease,test
+182341,Parkinson's Disease,test
+212954,Parkinson's Disease,test
+217828,Parkinson's Disease,test
+223557,Parkinson's Disease,test
+224574,Parkinson's Disease,test
+226669,Parkinson's Disease,test
+231048,Parkinson's Disease,test
+293702,Parkinson's Disease,test
+311402,Parkinson's Disease,test
+313702,Parkinson's Disease,test
+343776,Parkinson's Disease,test
+59390,Prodromal,test
+72651,Prodromal,test
+75411,Prodromal,test
+103842,Prodromal,test
+128230,Prodromal,test
+131619,Prodromal,test
+137805,Prodromal,test
+150818,Prodromal,test
+157620,Prodromal,test
+162997,Prodromal,test
+164422,Prodromal,test
+165685,Prodromal,test
+166680,Prodromal,test
+169297,Prodromal,test
+177768,Prodromal,test
+179594,Prodromal,test
+181750,Prodromal,test
+181975,Prodromal,test
+186378,Prodromal,test
+188077,Prodromal,test
+188795,Prodromal,test
+196680,Prodromal,test
+201607,Prodromal,test
+206260,Prodromal,test
+213162,Prodromal,test
+213954,Prodromal,test
+216637,Prodromal,test
+217787,Prodromal,test
+226609,Prodromal,test
+230608,Prodromal,test
+233802,Prodromal,test
+234578,Prodromal,test
+242810,Prodromal,test
+243552,Prodromal,test
+244748,Prodromal,test
+245298,Prodromal,test
+254254,Prodromal,test
+260115,Prodromal,test
+293714,Prodromal,test
+293733,Prodromal,test
+294137,Prodromal,test
+309504,Prodromal,test
+335188,Prodromal,test
+341248,Prodromal,test
+100890,Healthy Control,train
+100956,Healthy Control,train
+102366,Healthy Control,train
+103161,Healthy Control,train
+103183,Healthy Control,train
+103467,Healthy Control,train
+113050,Healthy Control,train
+116337,Healthy Control,train
+120545,Healthy Control,train
+121621,Healthy Control,train
+130556,Healthy Control,train
+149120,Healthy Control,train
+156459,Healthy Control,train
+160821,Healthy Control,train
+161329,Healthy Control,train
+167746,Healthy Control,train
+180966,Healthy Control,train
+187759,Healthy Control,train
+212409,Healthy Control,train
+241154,Healthy Control,train
+293057,Healthy Control,train
+293455,Healthy Control,train
+296092,Healthy Control,train
+311008,Healthy Control,train
+311011,Healthy Control,train
+311017,Healthy Control,train
+311043,Healthy Control,train
+311453,Healthy Control,train
+317115,Healthy Control,train
+335195,Healthy Control,train
+356887,Healthy Control,train
+369705,Healthy Control,train
+377547,Healthy Control,train
+40533,Parkinson's Disease,train
+40543,Parkinson's Disease,train
+43083,Parkinson's Disease,train
+53060,Parkinson's Disease,train
+71978,Parkinson's Disease,train
+100012,Parkinson's Disease,train
+100018,Parkinson's Disease,train
+100267,Parkinson's Disease,train
+100268,Parkinson's Disease,train
+101124,Parkinson's Disease,train
+101179,Parkinson's Disease,train
+101492,Parkinson's Disease,train
+101516,Parkinson's Disease,train
+101742,Parkinson's Disease,train
+101751,Parkinson's Disease,train
+102012,Parkinson's Disease,train
+102027,Parkinson's Disease,train
+102053,Parkinson's Disease,train
+102054,Parkinson's Disease,train
+102078,Parkinson's Disease,train
+102420,Parkinson's Disease,train
+102978,Parkinson's Disease,train
+103809,Parkinson's Disease,train
+103914,Parkinson's Disease,train
+107099,Parkinson's Disease,train
+109910,Parkinson's Disease,train
+110212,Parkinson's Disease,train
+110535,Parkinson's Disease,train
+111545,Parkinson's Disease,train
+113355,Parkinson's Disease,train
+119522,Parkinson's Disease,train
+137426,Parkinson's Disease,train
+140041,Parkinson's Disease,train
+141692,Parkinson's Disease,train
+141696,Parkinson's Disease,train
+142957,Parkinson's Disease,train
+143116,Parkinson's Disease,train
+144147,Parkinson's Disease,train
+148699,Parkinson's Disease,train
+149511,Parkinson's Disease,train
+149516,Parkinson's Disease,train
+150414,Parkinson's Disease,train
+150505,Parkinson's Disease,train
+152369,Parkinson's Disease,train
+152600,Parkinson's Disease,train
+160822,Parkinson's Disease,train
+161673,Parkinson's Disease,train
+162793,Parkinson's Disease,train
+162994,Parkinson's Disease,train
+166701,Parkinson's Disease,train
+170793,Parkinson's Disease,train
+172260,Parkinson's Disease,train
+173266,Parkinson's Disease,train
+174364,Parkinson's Disease,train
+174855,Parkinson's Disease,train
+175837,Parkinson's Disease,train
+179527,Parkinson's Disease,train
+179691,Parkinson's Disease,train
+181684,Parkinson's Disease,train
+182727,Parkinson's Disease,train
+182927,Parkinson's Disease,train
+184432,Parkinson's Disease,train
+184507,Parkinson's Disease,train
+215275,Parkinson's Disease,train
+216179,Parkinson's Disease,train
+218340,Parkinson's Disease,train
+219411,Parkinson's Disease,train
+219593,Parkinson's Disease,train
+219715,Parkinson's Disease,train
+223275,Parkinson's Disease,train
+226603,Parkinson's Disease,train
+226608,Parkinson's Disease,train
+230283,Parkinson's Disease,train
+231983,Parkinson's Disease,train
+236950,Parkinson's Disease,train
+238181,Parkinson's Disease,train
+239462,Parkinson's Disease,train
+239947,Parkinson's Disease,train
+241189,Parkinson's Disease,train
+242808,Parkinson's Disease,train
+243772,Parkinson's Disease,train
+244480,Parkinson's Disease,train
+245341,Parkinson's Disease,train
+248460,Parkinson's Disease,train
+250240,Parkinson's Disease,train
+250888,Parkinson's Disease,train
+251168,Parkinson's Disease,train
+253774,Parkinson's Disease,train
+262152,Parkinson's Disease,train
+292838,Parkinson's Disease,train
+292873,Parkinson's Disease,train
+292880,Parkinson's Disease,train
+293033,Parkinson's Disease,train
+293212,Parkinson's Disease,train
+293404,Parkinson's Disease,train
+293595,Parkinson's Disease,train
+293681,Parkinson's Disease,train
+293711,Parkinson's Disease,train
+293726,Parkinson's Disease,train
+293740,Parkinson's Disease,train
+293808,Parkinson's Disease,train
+293820,Parkinson's Disease,train
+293831,Parkinson's Disease,train
+306516,Parkinson's Disease,train
+308049,Parkinson's Disease,train
+311993,Parkinson's Disease,train
+313373,Parkinson's Disease,train
+315378,Parkinson's Disease,train
+319062,Parkinson's Disease,train
+325566,Parkinson's Disease,train
+356510,Parkinson's Disease,train
+55282,Prodromal,train
+55653,Prodromal,train
+57170,Prodromal,train
+58026,Prodromal,train
+58099,Prodromal,train
+58182,Prodromal,train
+58767,Prodromal,train
+59042,Prodromal,train
+59293,Prodromal,train
+59409,Prodromal,train
+59545,Prodromal,train
+59552,Prodromal,train
+59583,Prodromal,train
+59733,Prodromal,train
+70654,Prodromal,train
+71045,Prodromal,train
+71107,Prodromal,train
+71387,Prodromal,train
+71770,Prodromal,train
+72082,Prodromal,train
+72877,Prodromal,train
+74004,Prodromal,train
+75418,Prodromal,train
+75422,Prodromal,train
+101805,Prodromal,train
+102197,Prodromal,train
+102497,Prodromal,train
+112711,Prodromal,train
+113270,Prodromal,train
+113351,Prodromal,train
+113353,Prodromal,train
+114613,Prodromal,train
+117980,Prodromal,train
+120622,Prodromal,train
+121543,Prodromal,train
+127907,Prodromal,train
+134403,Prodromal,train
+134566,Prodromal,train
+134844,Prodromal,train
+136809,Prodromal,train
+138827,Prodromal,train
+139633,Prodromal,train
+139860,Prodromal,train
+142836,Prodromal,train
+143551,Prodromal,train
+146336,Prodromal,train
+146573,Prodromal,train
+148719,Prodromal,train
+153254,Prodromal,train
+158624,Prodromal,train
+159443,Prodromal,train
+162802,Prodromal,train
+162953,Prodromal,train
+163396,Prodromal,train
+164797,Prodromal,train
+164851,Prodromal,train
+166360,Prodromal,train
+170035,Prodromal,train
+170339,Prodromal,train
+170955,Prodromal,train
+171190,Prodromal,train
+172905,Prodromal,train
+174691,Prodromal,train
+174821,Prodromal,train
+175904,Prodromal,train
+176185,Prodromal,train
+177986,Prodromal,train
+178012,Prodromal,train
+179514,Prodromal,train
+179719,Prodromal,train
+181273,Prodromal,train
+182179,Prodromal,train
+182723,Prodromal,train
+183051,Prodromal,train
+183918,Prodromal,train
+184461,Prodromal,train
+184897,Prodromal,train
+185966,Prodromal,train
+191088,Prodromal,train
+194929,Prodromal,train
+199156,Prodromal,train
+200164,Prodromal,train
+200475,Prodromal,train
+201502,Prodromal,train
+201815,Prodromal,train
+203204,Prodromal,train
+203604,Prodromal,train
+212783,Prodromal,train
+212802,Prodromal,train
+213013,Prodromal,train
+213778,Prodromal,train
+214290,Prodromal,train
+214815,Prodromal,train
+215173,Prodromal,train
+215325,Prodromal,train
+218096,Prodromal,train
+219621,Prodromal,train
+220392,Prodromal,train
+223563,Prodromal,train
+223564,Prodromal,train
+224251,Prodromal,train
+224282,Prodromal,train
+224562,Prodromal,train
+225045,Prodromal,train
+225423,Prodromal,train
+225590,Prodromal,train
+226051,Prodromal,train
+226209,Prodromal,train
+226242,Prodromal,train
+226988,Prodromal,train
+229247,Prodromal,train
+229659,Prodromal,train
+230298,Prodromal,train
+230523,Prodromal,train
+232335,Prodromal,train
+232943,Prodromal,train
+233302,Prodromal,train
+234530,Prodromal,train
+235783,Prodromal,train
+237113,Prodromal,train
+238622,Prodromal,train
+238692,Prodromal,train
+238794,Prodromal,train
+238898,Prodromal,train
+239894,Prodromal,train
+240307,Prodromal,train
+240457,Prodromal,train
+240559,Prodromal,train
+240857,Prodromal,train
+240946,Prodromal,train
+242959,Prodromal,train
+243760,Prodromal,train
+243811,Prodromal,train
+243881,Prodromal,train
+243941,Prodromal,train
+244087,Prodromal,train
+250951,Prodromal,train
+251294,Prodromal,train
+251319,Prodromal,train
+252206,Prodromal,train
+252421,Prodromal,train
+252500,Prodromal,train
+253339,Prodromal,train
+254135,Prodromal,train
+255364,Prodromal,train
+260110,Prodromal,train
+272828,Prodromal,train
+275537,Prodromal,train
+276718,Prodromal,train
+283217,Prodromal,train
+292751,Prodromal,train
+292837,Prodromal,train
+292884,Prodromal,train
+292886,Prodromal,train
+292904,Prodromal,train
+292906,Prodromal,train
+292953,Prodromal,train
+292961,Prodromal,train
+293397,Prodromal,train
+293441,Prodromal,train
+293581,Prodromal,train
+293608,Prodromal,train
+293736,Prodromal,train
+293815,Prodromal,train
+293828,Prodromal,train
+294034,Prodromal,train
+294114,Prodromal,train
+294151,Prodromal,train
+294162,Prodromal,train
+294308,Prodromal,train
+294385,Prodromal,train
+296085,Prodromal,train
+296619,Prodromal,train
+297282,Prodromal,train
+300269,Prodromal,train
+301407,Prodromal,train
+302206,Prodromal,train
+305643,Prodromal,train
+306977,Prodromal,train
+311004,Prodromal,train
+311970,Prodromal,train
+314234,Prodromal,train
+315971,Prodromal,train
+321168,Prodromal,train
+322824,Prodromal,train
+324157,Prodromal,train
+324299,Prodromal,train
+324508,Prodromal,train
+325028,Prodromal,train
+325234,Prodromal,train
+325714,Prodromal,train
+326155,Prodromal,train
+329230,Prodromal,train
+331787,Prodromal,train
+335142,Prodromal,train
+338531,Prodromal,train
+338801,Prodromal,train
+339270,Prodromal,train
+346330,Prodromal,train
+349772,Prodromal,train
+352357,Prodromal,train
+359362,Prodromal,train
+366799,Prodromal,train
+370299,Prodromal,train
+372840,Prodromal,train
+388122,Prodromal,train
+118726,Healthy Control,val
+142086,Healthy Control,val
+171162,Healthy Control,val
+245566,Healthy Control,val
+311373,Healthy Control,val
+311442,Healthy Control,val
+342385,Healthy Control,val
+43046,Parkinson's Disease,val
+101146,Parkinson's Disease,val
+101755,Parkinson's Disease,val
+128196,Parkinson's Disease,val
+144120,Parkinson's Disease,val
+147407,Parkinson's Disease,val
+149116,Parkinson's Disease,val
+149937,Parkinson's Disease,val
+156734,Parkinson's Disease,val
+160231,Parkinson's Disease,val
+162941,Parkinson's Disease,val
+168082,Parkinson's Disease,val
+174615,Parkinson's Disease,val
+182745,Parkinson's Disease,val
+187800,Parkinson's Disease,val
+203717,Parkinson's Disease,val
+211482,Parkinson's Disease,val
+236926,Parkinson's Disease,val
+243612,Parkinson's Disease,val
+245573,Parkinson's Disease,val
+250963,Parkinson's Disease,val
+252870,Parkinson's Disease,val
+253783,Parkinson's Disease,val
+292768,Parkinson's Disease,val
+42381,Prodromal,val
+57159,Prodromal,val
+57398,Prodromal,val
+58224,Prodromal,val
+70345,Prodromal,val
+72083,Prodromal,val
+72562,Prodromal,val
+75564,Prodromal,val
+104147,Prodromal,val
+116869,Prodromal,val
+138266,Prodromal,val
+153175,Prodromal,val
+162996,Prodromal,val
+167981,Prodromal,val
+168255,Prodromal,val
+170190,Prodromal,val
+170287,Prodromal,val
+175385,Prodromal,val
+183703,Prodromal,val
+183771,Prodromal,val
+185015,Prodromal,val
+186102,Prodromal,val
+200637,Prodromal,val
+204248,Prodromal,val
+226605,Prodromal,val
+234588,Prodromal,val
+235039,Prodromal,val
+235540,Prodromal,val
+240629,Prodromal,val
+250096,Prodromal,val
+251277,Prodromal,val
+252046,Prodromal,val
+254474,Prodromal,val
+257957,Prodromal,val
+282583,Prodromal,val
+282720,Prodromal,val
+292801,Prodromal,val
+292846,Prodromal,val
+293066,Prodromal,val
+293515,Prodromal,val
+293823,Prodromal,val
+299722,Prodromal,val
+314186,Prodromal,val
+359353,Prodromal,val
