@@ -1,0 +1,38 @@
+{
+    "target": "neo_o",
+    "na_count": 51,
+    "subjects_total": 1248,
+    "bins": [
+        27.0,
+        32.0
+    ],
+    "label_counts": [
+        417,
+        394,
+        386
+    ],
+    "num_bins": 3,
+    "bin_stats": [
+        {
+            "bin": 0,
+            "count": 417,
+            "fraction": 0.3484,
+            "min": 12.0,
+            "max": 27.0
+        },
+        {
+            "bin": 1,
+            "count": 394,
+            "fraction": 0.3292,
+            "min": 28.0,
+            "max": 32.0
+        },
+        {
+            "bin": 2,
+            "count": 386,
+            "fraction": 0.3225,
+            "min": 33.0,
+            "max": 46.0
+        }
+    ]
+}

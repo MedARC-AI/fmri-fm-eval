@@ -1,0 +1,13 @@
+{
+    "target": "sex",
+    "na_count": 0,
+    "subjects_total": 1248,
+    "classes": [
+        "F",
+        "M"
+    ],
+    "label_counts": [
+        712,
+        536
+    ]
+}

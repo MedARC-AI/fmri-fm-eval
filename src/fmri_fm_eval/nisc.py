@@ -163,11 +163,11 @@ def fetch_schaefer_tian(
     return path
 
 
-def fetch_a424():
+def fetch_a424(cifti: bool = False) -> Path:
     base_url = (
         "https://github.com/emergelab/hierarchical-brain-networks/raw/refs/heads/master/brainmaps"
     )
-    filename = "A424+2mm.nii.gz"
+    filename = "A424.dlabel.nii" if cifti else "A424+2mm.nii.gz"
     path = download_file(base_url, filename, cache_dir=PARC_CACHE_DIR)
     return path
 
@@ -280,9 +280,9 @@ def parcel_average_schaefer_tian_fslr91k(num_rois: int, scale: int, **kwargs):
     return parcavg
 
 
-def parcel_average_a424(**kwargs):
-    path = fetch_a424()
-    parc = read_nifti_data(path)
+def parcel_average_a424(cifti: bool = False, **kwargs):
+    path = fetch_a424(cifti=cifti)
+    parc = read_cifti_data(path).squeeze(0) if cifti else read_nifti_data(path)
     parcavg = ParcelAverage(parc, **kwargs)
     return parcavg
 

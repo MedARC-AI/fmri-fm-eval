@@ -56,11 +56,11 @@ def schaefer400_tians3_reader() -> Reader:
     return fn
 
 
-def a424_reader() -> Reader:
-    parcavg = nisc.parcel_average_a424()
+def a424_reader(cifti: bool = False) -> Reader:
+    parcavg = nisc.parcel_average_a424(cifti=cifti)
 
     def fn(path: str):
-        series = nisc.read_nifti_data(path)
+        series = nisc.read_cifti_data(path) if cifti else nisc.read_nifti_data(path)
         series = parcavg(series)
         return series
 
